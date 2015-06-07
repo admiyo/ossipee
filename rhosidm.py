@@ -19,30 +19,39 @@ class WorkItem(object):
     def __init__(self, neutron):
         self.neutron = neutron
 
-class Network(WorkItem):                
+class Network(WorkItem):
+    def _networks_response(self):
+        return self.neutron.list_networks(name=network_name)
+
+    
     def cleanup(self):
-        for network in self.neutron.list_networks(name=network_name)['networks']:
+        for network in self._networks_response()['networks']:
             self.neutron.delete_network(network['id'])
         
-
     def create(self):    
         #openstack network create ayoung-private
         network = {'name': network_name, 'admin_state_up': True}
         self.neutron.create_network({'network':network})
 
     def display(self):
-        print('network')
+        for network in self._networks_response()['networks']:
+            print(network['name'])
 
-class SubNet(WorkItem):                
+class SubNet(WorkItem):
+
+    def _networks_response(self):
+        return self.neutron.list_networks(name=network_name)
+
+    def _subnet_response(self):
+        return self.neutron.list_subnets(name=subnet_name)
+    
     def cleanup(self):
-        for subnet in self.neutron.list_subnets(name=subnet_name)['subnets']:
+        for subnet in self._subnet_response()['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
-    def create(self):    
+    def create(self):        
         #neutron  subnet-create ayoung-private 192.168.52.0/24 --name ayoung-subnet1
-        for network in self.neutron.list_networks(name=network_name)['networks']:
-            print (network['name'])
-
+        network = self._networks_response()['networks'][0]
         body_create_subnet = {
             "subnets": [
                 {
@@ -57,23 +66,47 @@ class SubNet(WorkItem):
         subnet = self.neutron.create_subnet(body=body_create_subnet)
 
     def display(self):
-        print('subnet')
+        for subnet in self._subnet_response()['subnets']:
+            print (subnet['name'])
 
         
-class Router(WorkItem):                    
+class Router(WorkItem):
+    def _router_response(self):
+        return self.neutron.list_routers(name=router_name)
+
+
+    def _external_id(self):
+        return self.neutron.list_networks(name='external')['networks'][0]['id']
+        
+    #external_id=`neutron net-show external | awk '/ id / {print $4}'`
+
     def cleanup(self):
-        for router in self.neutron.list_routers(name=router_name)['routers']:
+        for router in self._router_response()['routers']:
             self.neutron.delete_router(router['id'])
 
     def create(self):    
-            body_value = {'router': {
-                'name' : router_name,
-                'admin_state_up': True,
-            }}
-            router = self.neutron.create_router(body=body_value)
+        body_value = {'router': {
+            'name' : router_name,
+            'admin_state_up': True,
+        }}
+        router = self.neutron.create_router(body=body_value)['router']
+        body_value = {
+            "port": {
+                "admin_state_up": True,
+                "device_id": router['id'],
+                "name": "port1",
+                "network_id": self._external_id()
+            }
+        }
+        response = self.neutron.create_port(body=body_value)
+
+
+            
+
 
     def display(self):
-        print('router')
+        for router in self._router_response()['routers']:
+            print(router['name'])
         
         
 #neutron router-create ayoung-private-router

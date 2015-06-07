@@ -1,9 +1,9 @@
 #!/usr/bin/python
 
 import logging
+
 import rhosidm
 
 #logging.basicConfig(level=logging.DEBUG)
 
-rhosidm.setup()
-
+rhosidm.teardown()
