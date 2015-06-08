@@ -27,9 +27,8 @@ class Network(WorkItem):
         return self.neutron.list_networks(name=network_name)
 
     def create(self):
-        #openstack network create ayoung-private
-        network = {'name': network_name, 'admin_state_up': True}
-        self.neutron.create_network({'network':network})
+        self.neutron.create_network(
+            {'network':{'name': network_name, 'admin_state_up': True}})
 
     def display(self):
         print(self._networks_response())
