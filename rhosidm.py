@@ -19,6 +19,19 @@ class WorkItem(object):
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
+    def _router_response(self):
+        return self.neutron.list_routers(name=router_name)
+
+    def _networks_response(self):
+        return self.neutron.list_networks(name=network_name)
+
+    def _subnet_response(self):
+        return self.neutron.list_subnets(name=subnet_name)
+
+    def _subnet_id(self):
+        return self._subnet_response()['subnets'][0]['id']
+
+
     def __init__(self, neutron):
         self.neutron = neutron
 
@@ -37,14 +50,8 @@ class Network(WorkItem):
         for network in self._networks_response()['networks']:
             self.neutron.delete_network(network['id'])
 
-            
+
 class SubNet(WorkItem):
-
-    def _networks_response(self):
-        return self.neutron.list_networks(name=network_name)
-
-    def _subnet_response(self):
-        return self.neutron.list_subnets(name=subnet_name)
 
     def create(self):
         network = self._networks_response()['networks'][0]
@@ -67,11 +74,8 @@ class SubNet(WorkItem):
         for subnet in self._subnet_response()['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
-        
-class Router(WorkItem):
-    def _router_response(self):
-        return self.neutron.list_routers(name=router_name)
 
+class Router(WorkItem):
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
@@ -90,11 +94,28 @@ class Router(WorkItem):
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
 
+class RouterInterface(WorkItem):
+
+    def create(self):
+        self.neutron.add_interface_router(
+            self._router_response()['routers'][0]['id'],
+            {"subnet_id": self._subnet_id()})
+
+    def display(self):
+        print ("RouterInterface")
+
+    def cleanup(self):
+        for router in self._router_response()['routers']:
+            for subnet in self._subnet_response()['subnets']:
+                try:
+                    self.neutron.remove_interface_router(
+                        router['id'], {"subnet_id": subnet['id']})
+                except Exception:
+                    pass
 
 #logging.basicConfig(level=logging.DEBUG)
 
-class Worklist(object):
-    def __init__(self):
+def create_session():
 
         OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
         OS_USERNAME = os.environ.get('OS_USERNAME')
@@ -110,15 +131,21 @@ class Worklist(object):
                            project_name=OS_PROJECT_NAME,
                            project_domain_name=OS_PROJECT_DOMAIN_NAME)
 
-
         session = ksc_session.Session(auth=auth)
+        return session
+
+
+class Worklist(object):
+    def __init__(self):
+
+        session = create_session()
         keystone = keystone_v3.Client(session=session)
         nova = novaclient.Client('2', session=session)
         neutron = neutronclient.Client('2.0', session=session)
         neutron.format = 'json'
 
 
-        work_item_classes =[Router,Network,SubNet]
+        work_item_classes =[Router,Network,SubNet,RouterInterface]
 
         self.work_items = []
 
