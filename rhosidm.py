@@ -35,7 +35,13 @@ class WorkItem(object):
         for image in self.nova.images.list():
             if image.name == image_name:
                 return image.id
-    
+
+    def get_flavor_id(self, flavor_name):
+        for flavor in self.nova.flavors.list():
+            if flavor.name == flavor_name:
+                return flavor.id
+
+            
     def __init__(self, neutron, nova):
         self.neutron = neutron
         self.nova = nova
@@ -130,51 +136,52 @@ class NovaHost(WorkItem):
         host.flavor = "m1.medium"
         host.image = "centos-7-x86_64"
         host.key= "ayoung-pubkey"
-        host.security_group = "default"
+        host.security_groups = ["default"]
         host.name= "demo.cloudlab.freeipa.org"
         host.image_id = self.get_image_id(host.image)
+        host.flavor_id = self.get_flavor_id(host.flavor)
+        host.nics = []
         
-        self.host = host
-    
+        for network in self._networks_response()['networks']:
+            host.nics.append({'net-id': network['id']})
+        
+        return host
     
     def create(self):
 
         self._host()
-        host_entry = self.host
-        
-        print ( host_entry.flavor)
-        if True:
-            return
+        host_entry = self._host()
         
         self.nova.servers.create(
             host_entry.name,
             host_entry.image_id,
             host_entry.flavor_id,
+            security_groups = host_entry.security_groups,
+            nics=host_entry.nics,
             meta = None,
             files = None,
             reservation_id = None,
             min_count = 1,
             max_count = 1,
-            security_groups = host_entry.security_groups,
-            userdata = host_entry.userdata,
-            key_name = host_entry.key_name,
+            userdata = None,#host_entry.userdata,
+            key_name = host_entry.key,
             availability_zone = None,
             block_device_mapping= None,
-            nics= None,
             scheduler_hints= None,
-            config_drive= None)
+            config_drive= None
+        )
 
 
         
-    def display(self):
-        self._host()
-        print(self.host.image_id)
-                
-#        for server in self.nova.servers.list():
-#            print (server)
+    def display(self):                
+        for server in self.nova.servers.list():
+            if server.name == "demo.cloudlab.freeipa.org":
+                print (server)
 
     def cleanup(self):
-        pass
+        for server in self.nova.servers.list():
+            if server.name == "demo.cloudlab.freeipa.org":
+                self.nova.servers.delete(server.id)
 
 
 _auth = None
@@ -218,9 +225,7 @@ class Worklist(object):
         neutron.format = 'json'
 
 
-        #work_item_classes =[Router,Network,SubNet,RouterInterface]
-
-        work_item_classes =[NovaHost]
+        work_item_classes =[Router,Network,SubNet,RouterInterface,NovaHost]
 
 
         self.work_items = []
