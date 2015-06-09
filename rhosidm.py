@@ -1,9 +1,9 @@
 import os
+import logging
 
 from keystoneclient.v3 import client as keystoneclient
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
-
 
 from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
@@ -31,9 +31,14 @@ class WorkItem(object):
     def _subnet_id(self):
         return self._subnet_response()['subnets'][0]['id']
 
-
-    def __init__(self, neutron):
+    def get_image_id(self, image_name):
+        for image in self.nova.images.list():
+            if image.name == image_name:
+                return image.id
+    
+    def __init__(self, neutron, nova):
         self.neutron = neutron
+        self.nova = nova
 
 class Network(WorkItem):
     def _networks_response(self):
@@ -113,10 +118,71 @@ class RouterInterface(WorkItem):
                 except Exception:
                     pass
 
-#logging.basicConfig(level=logging.DEBUG)
+class Host(object):
+    pass
 
-def create_session():
+            
+                
+class NovaHost(WorkItem):
 
+    def _host(self):        
+        host = Host()
+        host.flavor = "m1.medium"
+        host.image = "centos-7-x86_64"
+        host.key= "ayoung-pubkey"
+        host.security_group = "default"
+        host.name= "demo.cloudlab.freeipa.org"
+        host.image_id = self.get_image_id(host.image)
+        
+        self.host = host
+    
+    
+    def create(self):
+
+        self._host()
+        host_entry = self.host
+        
+        print ( host_entry.flavor)
+        if True:
+            return
+        
+        self.nova.servers.create(
+            host_entry.name,
+            host_entry.image_id,
+            host_entry.flavor_id,
+            meta = None,
+            files = None,
+            reservation_id = None,
+            min_count = 1,
+            max_count = 1,
+            security_groups = host_entry.security_groups,
+            userdata = host_entry.userdata,
+            key_name = host_entry.key_name,
+            availability_zone = None,
+            block_device_mapping= None,
+            nics= None,
+            scheduler_hints= None,
+            config_drive= None)
+
+
+        
+    def display(self):
+        self._host()
+        print(self.host.image_id)
+                
+#        for server in self.nova.servers.list():
+#            print (server)
+
+    def cleanup(self):
+        pass
+
+
+_auth = None
+_session = None
+
+def get_auth():
+    if _auth is None:
+        
         OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
         OS_USERNAME = os.environ.get('OS_USERNAME')
         OS_PASSWORD= os.environ.get('OS_PASSWORD')
@@ -131,9 +197,14 @@ def create_session():
                            project_name=OS_PROJECT_NAME,
                            project_domain_name=OS_PROJECT_DOMAIN_NAME)
 
-        session = ksc_session.Session(auth=auth)
+    return auth
+        
+def create_session():
+        session = ksc_session.Session(auth=get_auth())
         return session
 
+
+    
 
 class Worklist(object):
     def __init__(self):
@@ -142,15 +213,20 @@ class Worklist(object):
         keystone = keystone_v3.Client(session=session)
         nova = novaclient.Client('2', session=session)
         neutron = neutronclient.Client('2.0', session=session)
+
+        
         neutron.format = 'json'
 
 
-        work_item_classes =[Router,Network,SubNet,RouterInterface]
+        #work_item_classes =[Router,Network,SubNet,RouterInterface]
+
+        work_item_classes =[NovaHost]
+
 
         self.work_items = []
 
         for item_class in work_item_classes:
-            self.work_items.append(item_class(neutron))
+            self.work_items.append(item_class(neutron, nova))
 
 
     def setup(self):
@@ -165,9 +241,13 @@ class Worklist(object):
         for item in self.work_items:
             item.display()
 
+def enable_logging():
+    logging.basicConfig(level=logging.DEBUG)
+
 
 def setup():
     Worklist().setup()
+
 
 def teardown():
     Worklist().teardown()

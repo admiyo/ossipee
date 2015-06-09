@@ -1,0 +1,16 @@
+Code to set up a Demo running on top of OpenStack
+
+Right now, it just sets up Neutron, using the Python API.
+
+source your keystone.rc file and then run
+
+./setup
+
+to set up the demo
+
+./display
+to show the status of the components
+
+
+./cleanup
+to Tear down the demo

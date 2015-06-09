@@ -3,7 +3,6 @@
 import logging
 
 import rhosidm
-
-#logging.basicConfig(level=logging.DEBUG)
+#rhosidm.enable_logging()
 
 rhosidm.display()
