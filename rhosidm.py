@@ -43,7 +43,7 @@ class WorkItem(object):
             if flavor.name == flavor_name:
                 return flavor.id
 
-            
+
     def __init__(self, neutron, nova):
         self.neutron = neutron
         self.nova = nova
@@ -150,8 +150,8 @@ class FloatIP(WorkItem):
             print ("IP assign failed. Waiting 5 seconds to try again.")
             time.sleep(5)
             server.add_floating_ip(float.ip)
-            
-    
+
+
     def display(self):
         for server in self.nova.servers.list():
             if server.name == "demo.cloudlab.freeipa.org":
@@ -168,21 +168,21 @@ class FloatIP(WorkItem):
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
                 break
-        
+
         print (" Removing  %s from host id %s" % (float.ip, server.id) )
         server.remove_floating_ip(float)
 
-                    
-                
-                
+
+
+
 class Host(object):
     pass
 
-            
-                
+
+
 class NovaHost(WorkItem):
 
-    def _host(self):        
+    def _host(self):
         host = Host()
         host.flavor = "m1.medium"
         host.image = "centos-7-x86_64"
@@ -192,13 +192,13 @@ class NovaHost(WorkItem):
         host.image_id = self.get_image_id(host.image)
         host.flavor_id = self.get_flavor_id(host.flavor)
         host.nics = []
-        
+
         for network in self._networks_response()['networks']:
             host.nics.append({'net-id': network['id']})
-        
+
         return host
 
-    def wait_for_creation(self, host_id):    
+    def wait_for_creation(self, host_id):
         found = False
         while not found:
             try:
@@ -209,12 +209,12 @@ class NovaHost(WorkItem):
                 print (".")
                 pass
 
-    
+
     def create(self):
 
         self._host()
         host_entry = self._host()
-        
+
         response = self.nova.servers.create(
             host_entry.name,
             host_entry.image_id,
@@ -233,9 +233,9 @@ class NovaHost(WorkItem):
             scheduler_hints= None,
             config_drive= None
         )
-        self.wait_for_creation(response.id)       
-        
-    def display(self):                
+        self.wait_for_creation(response.id)
+
+    def display(self):
         for server in self.nova.servers.list():
             if server.name == "demo.cloudlab.freeipa.org":
                 print (server)
@@ -251,7 +251,7 @@ _session = None
 
 def get_auth():
     if _auth is None:
-        
+
         OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
         OS_USERNAME = os.environ.get('OS_USERNAME')
         OS_PASSWORD= os.environ.get('OS_PASSWORD')
@@ -267,13 +267,13 @@ def get_auth():
                            project_domain_name=OS_PROJECT_DOMAIN_NAME)
 
     return auth
-        
+
 def create_session():
         session = ksc_session.Session(auth=get_auth())
         return session
 
 
-    
+
 
 class Worklist(object):
     def __init__(self):
@@ -288,14 +288,11 @@ class Worklist(object):
             Router, Network, SubNet, RouterInterface, NovaHost,
             FloatIP
         ]
-       
+
         self.work_items = []
 
         for item_class in work_item_classes:
             self.work_items.append(item_class(neutron, nova))
-
-        self.float_ip = FloatIP(neutron, nova)
-            
 
     def create(self):
         for item in self.work_items:
@@ -326,8 +323,3 @@ def teardown():
 def display():
     wl = Worklist()
     wl.display()
-
-def float_ip():
-    Worklist().float_ip.create()
-
-    
