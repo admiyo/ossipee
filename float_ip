@@ -5,5 +5,4 @@ import rhosidm
 
 logging.basicConfig(level=logging.INFO)
 
-rhosidm.create()
-
+rhosidm.float_ip()

@@ -13,7 +13,7 @@ from keystoneclient.v3 import client as keystone_v3
 router_name = 'rdo-router'
 network_name ='rdo-net'
 subnet_name ='rdo-subnet'
-
+server_name='demo.cloudlab.freeipa.org'
 
 class WorkItem(object):
     def _external_id(self):
@@ -113,7 +113,13 @@ class RouterInterface(WorkItem):
             {"subnet_id": self._subnet_id()})
 
     def display(self):
-        print ("RouterInterface")
+        for router in self._router_response()['routers']:
+            for subnet in self._subnet_response()['subnets']:
+                try:
+                    print("router %s on subnet %s" % (router['id'],
+                                                      subnet['id']))
+                except Exception:
+                    pass
 
     def cleanup(self):
         for router in self._router_response()['routers']:
@@ -124,6 +130,43 @@ class RouterInterface(WorkItem):
                 except Exception:
                     pass
 
+class FloatIP(WorkItem):
+
+    def create(self):
+        ip_list = self.nova.floating_ips.list()
+        for float in ip_list:
+            if float.instance_id == None:
+                break
+        for server in self.nova.servers.list():
+            if server.name == server_name:
+                break
+        print (" Assigning %s to host id %s" % (float.ip, server.id) )
+
+        server.add_floating_ip(float.ip)
+    
+    def display(self):
+        for server in self.nova.servers.list():
+            if server.name == "demo.cloudlab.freeipa.org":
+                break
+
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                print (float.ip)
+
+    def cleanup(self):
+        for server in self.nova.servers.list():
+            if server.name == "demo.cloudlab.freeipa.org":
+                break
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                break
+        
+        print (" Removing  %s from host id %s" % (float.ip, server.id) )
+        server.remove_floating_ip(float)
+
+                    
+                
+                
 class Host(object):
     pass
 
@@ -137,7 +180,7 @@ class NovaHost(WorkItem):
         host.image = "centos-7-x86_64"
         host.key= "ayoung-pubkey"
         host.security_groups = ["default"]
-        host.name= "demo.cloudlab.freeipa.org"
+        host.name= server_name
         host.image_id = self.get_image_id(host.image)
         host.flavor_id = self.get_flavor_id(host.flavor)
         host.nics = []
@@ -146,13 +189,25 @@ class NovaHost(WorkItem):
             host.nics.append({'net-id': network['id']})
         
         return host
+
+    def wait_for_creation(self, host_id):    
+        found = False
+        while not found:
+            try:
+                self.nova.servers.get(host_id)
+                found = True
+                print ("Host %s created" % host_id)
+            except Exception as e:
+                print (".")
+                pass
+
     
     def create(self):
 
         self._host()
         host_entry = self._host()
         
-        self.nova.servers.create(
+        response = self.nova.servers.create(
             host_entry.name,
             host_entry.image_id,
             host_entry.flavor_id,
@@ -170,8 +225,7 @@ class NovaHost(WorkItem):
             scheduler_hints= None,
             config_drive= None
         )
-
-
+        self.wait_for_creation(response.id)       
         
     def display(self):                
         for server in self.nova.servers.list():
@@ -221,26 +275,30 @@ class Worklist(object):
         nova = novaclient.Client('2', session=session)
         neutron = neutronclient.Client('2.0', session=session)
 
-        
         neutron.format = 'json'
-
-
-        work_item_classes =[Router,Network,SubNet,RouterInterface,NovaHost]
-
-
+        work_item_classes = [
+            Router, Network, SubNet, RouterInterface, NovaHost,
+            FloatIP
+        ]
+       
         self.work_items = []
 
         for item_class in work_item_classes:
             self.work_items.append(item_class(neutron, nova))
 
+        self.float_ip = FloatIP(neutron, nova)
+            
 
-    def setup(self):
+    def create(self):
         for item in self.work_items:
             item.create()
 
     def teardown(self):
         for item in reversed(self.work_items):
-            item.cleanup()
+            try:
+                item.cleanup()
+            except Exception:
+                pass
 
     def display(self):
         for item in self.work_items:
@@ -250,8 +308,8 @@ def enable_logging():
     logging.basicConfig(level=logging.DEBUG)
 
 
-def setup():
-    Worklist().setup()
+def create():
+    Worklist().create()
 
 
 def teardown():
@@ -260,3 +318,8 @@ def teardown():
 def display():
     wl = Worklist()
     wl.display()
+
+def float_ip():
+    Worklist().float_ip.create()
+
+    
