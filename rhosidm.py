@@ -1,9 +1,11 @@
+import time
 import os
 import logging
 
 from keystoneclient.v3 import client as keystoneclient
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
+from novaclient import exceptions as nova_exceptions
 
 from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
@@ -142,7 +144,13 @@ class FloatIP(WorkItem):
                 break
         print (" Assigning %s to host id %s" % (float.ip, server.id) )
 
-        server.add_floating_ip(float.ip)
+        try:
+            server.add_floating_ip(float.ip)
+        except nova_exceptions.BadRequest:
+            print ("IP assign failed. Waiting 5 seconds to try again.")
+            time.sleep(5)
+            server.add_floating_ip(float.ip)
+            
     
     def display(self):
         for server in self.nova.servers.list():
