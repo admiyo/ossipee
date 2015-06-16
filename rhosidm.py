@@ -1,6 +1,7 @@
-import time
-import os
 import logging
+import os
+import sys
+import time
 
 from keystoneclient.v3 import client as keystoneclient
 from neutronclient.neutron import client as neutronclient
@@ -10,7 +11,7 @@ from novaclient import exceptions as nova_exceptions
 from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
-
+import ansible.runner
 
 router_name = 'rdo-router'
 network_name ='rdo-net'
@@ -246,6 +247,10 @@ class NovaHost(WorkItem):
                 self.nova.servers.delete(server.id)
 
 
+class IPAServer(WorkItem):
+    pass
+    #ansible rdo -i ~/.ossipee/inventory.ini -u centos --sudo -m yum -a "name=ipa-server state=present"
+
 _auth = None
 _session = None
 
@@ -258,6 +263,10 @@ def get_auth():
         OS_USER_DOMAIN_NAME=os.environ.get('OS_USER_DOMAIN_NAME')
         OS_PROJECT_DOMAIN_NAME=os.environ.get('OS_PROJECT_DOMAIN_NAME')
         OS_PROJECT_NAME=os.environ.get('OS_PROJECT_NAME')
+
+        if  OS_AUTH_URL is None:
+            print ("OS_AUTH_URL not set.  Aborting.")
+            sys.exit(-1)
 
         auth = v3.Password(auth_url=OS_AUTH_URL,
                            username=OS_USERNAME,
