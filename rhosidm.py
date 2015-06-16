@@ -13,44 +13,23 @@ from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
 import ansible.runner
 
-
-work_plan = {
-    'net1':{
-        'router_name': 'rdo-router',
-        'network_name':'rdo-net',
-        'subnet_name':'rdo-subnet',
-        'subnet_cidr': '192.168.52.0/24'
-    },
-    'hosts':{
-        'ipa': {
-            'security_groups': ['default']
-        },
-        'rdo': {
-            'security_groups': ['default']
-        },
-    },
-    'host_common': {
-        'domain': 'cloudlab.younglogic.net',
-        'flavor': 'm1.medium',
-        'image': 'centos-7-x86_64',
-        'key': 'ayoung-pubkey'
-    }
-}
-
-server_name='ipa.' + work_plan['host_common']['domain']
+router_name = 'rdo-router'
+network_name ='rdo-net'
+subnet_name ='rdo-subnet'
+server_name='demo.cloudlab.freeipa.org'
 
 class WorkItem(object):
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
     def _router_response(self):
-        return self.neutron.list_routers(name=work_plan['net1']['router_name'])
+        return self.neutron.list_routers(name=router_name)
 
     def _networks_response(self):
-        return self.neutron.list_networks(name=work_plan['net1']['network_name'])
+        return self.neutron.list_networks(name=network_name)
 
     def _subnet_response(self):
-        return self.neutron.list_subnets(name=work_plan['net1']['subnet_name'])
+        return self.neutron.list_subnets(name=subnet_name)
 
     def _subnet_id(self):
         return self._subnet_response()['subnets'][0]['id']
@@ -72,14 +51,11 @@ class WorkItem(object):
 
 class Network(WorkItem):
     def _networks_response(self):
-        return self.neutron.list_networks(
-            name=work_plan['net1']['network_name'])
+        return self.neutron.list_networks(name=network_name)
 
     def create(self):
         self.neutron.create_network(
-            {'network':{
-                'name': work_plan['net1']['network_name'],
-                'admin_state_up': True}})
+            {'network':{'name': network_name, 'admin_state_up': True}})
 
     def display(self):
         print(self._networks_response())
@@ -95,12 +71,12 @@ class SubNet(WorkItem):
         network = self._networks_response()['networks'][0]
         subnet = self.neutron.create_subnet(
             body={
-                'subnets': [
+                "subnets": [
                     {
-                        'name': work_plan['net1']['subnet_name'],
-                        'cidr': work_plan['net1']['subnet_cidr'],
-                        'ip_version': 4,
-                        'network_id': network['id']
+                        "name": subnet_name,
+                        "cidr": "192.168.52.0/24",
+                        "ip_version": 4,
+                        "network_id": network['id']
                     }
                 ]
             })
@@ -117,7 +93,7 @@ class Router(WorkItem):
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
-                'name' : work_plan['net1']['router_name'],
+                'name' : router_name,
                 'admin_state_up': True,
             }})['router']
         self.neutron.add_gateway_router(
@@ -137,13 +113,13 @@ class RouterInterface(WorkItem):
     def create(self):
         self.neutron.add_interface_router(
             self._router_response()['routers'][0]['id'],
-            {'subnet_id': self._subnet_id()})
+            {"subnet_id": self._subnet_id()})
 
     def display(self):
         for router in self._router_response()['routers']:
             for subnet in self._subnet_response()['subnets']:
                 try:
-                    print('router %s on subnet %s' % (router['id'],
+                    print("router %s on subnet %s" % (router['id'],
                                                       subnet['id']))
                 except Exception:
                     pass
@@ -153,7 +129,7 @@ class RouterInterface(WorkItem):
             for subnet in self._subnet_response()['subnets']:
                 try:
                     self.neutron.remove_interface_router(
-                        router['id'], {'subnet_id': subnet['id']})
+                        router['id'], {"subnet_id": subnet['id']})
                 except Exception:
                     pass
 
@@ -167,19 +143,19 @@ class FloatIP(WorkItem):
         for server in self.nova.servers.list():
             if server.name == server_name:
                 break
-        print (' Assigning %s to host id %s' % (float.ip, server.id) )
+        print (" Assigning %s to host id %s" % (float.ip, server.id) )
 
         try:
             server.add_floating_ip(float.ip)
         except nova_exceptions.BadRequest:
-            print ('IP assign failed. Waiting 5 seconds to try again.')
+            print ("IP assign failed. Waiting 5 seconds to try again.")
             time.sleep(5)
             server.add_floating_ip(float.ip)
 
 
     def display(self):
         for server in self.nova.servers.list():
-            if server.name == server_name:
+            if server.name == "demo.cloudlab.freeipa.org":
                 break
 
         for float in self.nova.floating_ips.list():
@@ -188,29 +164,32 @@ class FloatIP(WorkItem):
 
     def cleanup(self):
         for server in self.nova.servers.list():
-            if server.name == server_name:
+            if server.name == "demo.cloudlab.freeipa.org":
                 break
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
-                print (' Removing  %s from host id %s' % (float.ip, server.id) )
-                server.remove_floating_ip(float)
                 break
+
+        print (" Removing  %s from host id %s" % (float.ip, server.id) )
+        server.remove_floating_ip(float)
+
+
 
 
 class Host(object):
     pass
 
 
+
 class NovaHost(WorkItem):
 
     def _host(self):
-        hostname = 'ipa'
         host = Host()
-        host.flavor = work_plan['host_common']['flavor']
-        host.image = work_plan['host_common']['image']
-        host.key= work_plan['host_common']['key']
-        host.security_groups = work_plan['hosts'][hostname]['security_groups']
-        host.name= hostname + "." + work_plan['host_common']['domain']
+        host.flavor = "m1.medium"
+        host.image = "centos-7-x86_64"
+        host.key= "ayoung-pubkey"
+        host.security_groups = ["default"]
+        host.name= server_name
         host.image_id = self.get_image_id(host.image)
         host.flavor_id = self.get_flavor_id(host.flavor)
         host.nics = []
@@ -226,9 +205,9 @@ class NovaHost(WorkItem):
             try:
                 self.nova.servers.get(host_id)
                 found = True
-                print ('Host %s created' % host_id)
+                print ("Host %s created" % host_id)
             except Exception as e:
-                print ('.')
+                print (".")
                 pass
 
 
@@ -259,12 +238,12 @@ class NovaHost(WorkItem):
 
     def display(self):
         for server in self.nova.servers.list():
-            if server.name == server_name:
+            if server.name == "demo.cloudlab.freeipa.org":
                 print (server)
 
     def cleanup(self):
         for server in self.nova.servers.list():
-            if server.name == server_name:
+            if server.name == "demo.cloudlab.freeipa.org":
                 self.nova.servers.delete(server.id)
 
 
@@ -286,7 +265,7 @@ def get_auth():
         OS_PROJECT_NAME=os.environ.get('OS_PROJECT_NAME')
 
         if  OS_AUTH_URL is None:
-            print ('OS_AUTH_URL not set.  Aborting.')
+            print ("OS_AUTH_URL not set.  Aborting.")
             sys.exit(-1)
 
         auth = v3.Password(auth_url=OS_AUTH_URL,
