@@ -13,23 +13,51 @@ from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
 import ansible.runner
 
-router_name = 'rdo-router'
-network_name ='rdo-net'
-subnet_name ='rdo-subnet'
-server_name='demo.cloudlab.freeipa.org'
+
+class DTO(object):
+    def params_to_properties(params):          
+        keys = params().keys()
+        keys.remove('self')
+        for key in keys:
+            setattr(self, key, params()[key])
+
+class HostDTO(DTO):
+    def _init__(self, name, image, key, security_groups, nics):
+        self.params_to_properites(self, locals)
+
+
+class Host(object):
+    pass
+
+
+class Plan(object):
+    server_name='ipa.ayoung'
+    router_name = 'rdo-router'
+    network_name ='rdo-net'
+    subnet_name ='rdo-subnet'
+    cidr = "192.168.52.0/24"
+    flavor = "m1.medium"
+    image = "centos-7-x86_64"
+    key= "ayoung-pubkey"
+    security_groups = ["default"]
+    
+    
+class WorkInProgress(object):
+    pass
+
 
 class WorkItem(object):
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
     def _router_response(self):
-        return self.neutron.list_routers(name=router_name)
+        return self.neutron.list_routers(name=self.plan.router_name)
 
     def _networks_response(self):
-        return self.neutron.list_networks(name=network_name)
+        return self.neutron.list_networks(name=self.plan.network_name)
 
     def _subnet_response(self):
-        return self.neutron.list_subnets(name=subnet_name)
+        return self.neutron.list_subnets(name=self.plan.subnet_name)
 
     def _subnet_id(self):
         return self._subnet_response()['subnets'][0]['id']
@@ -45,17 +73,20 @@ class WorkItem(object):
                 return flavor.id
 
 
-    def __init__(self, neutron, nova):
+    def __init__(self, neutron, nova, plan):
         self.neutron = neutron
         self.nova = nova
+        self.plan = plan
 
 class Network(WorkItem):
     def _networks_response(self):
-        return self.neutron.list_networks(name=network_name)
+        return self.neutron.list_networks(name=self.plan.network_name)
 
     def create(self):
         self.neutron.create_network(
-            {'network':{'name': network_name, 'admin_state_up': True}})
+            {'network':
+             {'name':self.plan.network_name,
+              'admin_state_up': True}})
 
     def display(self):
         print(self._networks_response())
@@ -73,8 +104,8 @@ class SubNet(WorkItem):
             body={
                 "subnets": [
                     {
-                        "name": subnet_name,
-                        "cidr": "192.168.52.0/24",
+                        "name": self.plan.subnet_name,
+                        "cidr": self.plan.cidr,
                         "ip_version": 4,
                         "network_id": network['id']
                     }
@@ -93,7 +124,7 @@ class Router(WorkItem):
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
-                'name' : router_name,
+                'name' : self.plan.router_name,
                 'admin_state_up': True,
             }})['router']
         self.neutron.add_gateway_router(
@@ -141,7 +172,7 @@ class FloatIP(WorkItem):
             if float.instance_id == None:
                 break
         for server in self.nova.servers.list():
-            if server.name == server_name:
+            if server.name == self.plan.server_name:
                 break
         print (" Assigning %s to host id %s" % (float.ip, server.id) )
 
@@ -164,7 +195,7 @@ class FloatIP(WorkItem):
 
     def cleanup(self):
         for server in self.nova.servers.list():
-            if server.name == "demo.cloudlab.freeipa.org":
+            if server.name == self.plan.server_name:
                 break
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
@@ -176,20 +207,15 @@ class FloatIP(WorkItem):
 
 
 
-class Host(object):
-    pass
-
-
-
 class NovaHost(WorkItem):
 
     def _host(self):
         host = Host()
-        host.flavor = "m1.medium"
-        host.image = "centos-7-x86_64"
-        host.key= "ayoung-pubkey"
-        host.security_groups = ["default"]
-        host.name= server_name
+        host.flavor = self.plan.flavor
+        host.image = self.plan.image
+        host.key= self.plan.key
+        host.security_groups = self.plan.security_groups
+        host.name= self.plan.server_name
         host.image_id = self.get_image_id(host.image)
         host.flavor_id = self.get_flavor_id(host.flavor)
         host.nics = []
@@ -238,12 +264,12 @@ class NovaHost(WorkItem):
 
     def display(self):
         for server in self.nova.servers.list():
-            if server.name == "demo.cloudlab.freeipa.org":
+            if server.name == self.plan.server_name:
                 print (server)
 
     def cleanup(self):
         for server in self.nova.servers.list():
-            if server.name == "demo.cloudlab.freeipa.org":
+            if server.name == self.plan.server_name:
                 self.nova.servers.delete(server.id)
 
 
@@ -287,6 +313,7 @@ def create_session():
 class Worklist(object):
     def __init__(self):
 
+        plan = Plan()
         session = create_session()
         keystone = keystone_v3.Client(session=session)
         nova = novaclient.Client('2', session=session)
@@ -301,7 +328,7 @@ class Worklist(object):
         self.work_items = []
 
         for item_class in work_item_classes:
-            self.work_items.append(item_class(neutron, nova))
+            self.work_items.append(item_class(neutron, nova, plan))
 
     def create(self):
         for item in self.work_items:
