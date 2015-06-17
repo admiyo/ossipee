@@ -14,32 +14,22 @@ from keystoneclient.v3 import client as keystone_v3
 import ansible.runner
 
 
-class DTO(object):
-    def params_to_properties(params):          
-        keys = params().keys()
-        keys.remove('self')
-        for key in keys:
-            setattr(self, key, params()[key])
-
-class HostDTO(DTO):
-    def _init__(self, name, image, key, security_groups, nics):
-        self.params_to_properites(self, locals)
-
 
 class Host(object):
     pass
 
 
 class Plan(object):
-    server_name='ipa.ayoung'
-    domain_name = '.ayoung'
-    router_name = 'rdo-router'
-    network_name ='rdo-net'
-    subnet_name ='rdo-subnet'
+    name='ayoung'
+    domain_name = '.' + name
+    router_name = name + '-router'
+    network_name = name + '-net'
+    subnet_name = name + '-subnet'
     cidr = "192.168.52.0/24"
     flavor = "m1.medium"
-    image = "centos-7-x86_64"
-    key= "ayoung-pubkey"
+#    image = "centos-7-x86_64"
+    image = "centos-7-cloud"
+    key= name + "-pubkey"
     security_groups = ["default"]
 
     host_names = ['ipa','rdo']
@@ -173,14 +163,19 @@ class RouterInterface(WorkItem):
 
 class FloatIP(WorkItem):
 
-    def create(self):
+    def next_float_ip(self):
         ip_list = self.nova.floating_ips.list()
         for float in ip_list:
             if float.instance_id == None:
-                break
+                return float
+        return None
+        
+    
+    def create(self):
         for server in self.list_servers():
-            print (" Assigning %s to host id %s" % (float.ip, server.id) )
             try:
+                float = self.next_float_ip()
+                print (" Assigning %s to host id %s" % (float.ip, server.id) )
                 server.add_floating_ip(float.ip)
             except nova_exceptions.BadRequest:
                 print ("IP assign failed. Waiting 5 seconds to try again.")
@@ -189,13 +184,10 @@ class FloatIP(WorkItem):
 
 
     def display(self):
-        for server in self.nova.servers.list():
-            if server.name == "demo.cloudlab.freeipa.org":
-                break
-
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                print (float.ip)
+        for server in self.list_servers():
+            for float in self.nova.floating_ips.list():
+                if float.instance_id == server.id:
+                    print (float.ip)
 
     def cleanup(self):
         for server in self.list_servers():
@@ -209,34 +201,23 @@ class FloatIP(WorkItem):
 
 class NovaHost(WorkItem):
     def _host(self, name):
-        host = Host()
-        host.flavor = self.plan.flavor
-        host.image = self.plan.image
-        host.key= self.plan.key
-        host.security_groups = self.plan.security_groups
-        host.name= name + self.plan.domain_name
-        host.image_id = self.get_image_id(host.image)
-        host.flavor_id = self.get_flavor_id(host.flavor)
-        host.nics = []
-
+        nics = []
         for network in self._networks_response()['networks']:
-            host.nics.append({'net-id': network['id']})
-
-        host_entry = host
+            nics.append({'net-id': network['id']})
         
         response = self.nova.servers.create(
-            host_entry.name,
-            host_entry.image_id,
-            host_entry.flavor_id,
-            security_groups = host_entry.security_groups,
-            nics=host_entry.nics,
+            name + self.plan.domain_name,
+            self.get_image_id(self.plan.image),
+            self.get_flavor_id(self.plan.flavor),
+            security_groups = self.plan.security_groups,
+            nics=nics,
             meta = None,
             files = None,
             reservation_id = None,
             min_count = 1,
             max_count = 1,
             userdata = None,#host_entry.userdata,
-            key_name = host_entry.key,
+            key_name = self.plan.key,
             availability_zone = None,
             block_device_mapping= None,
             scheduler_hints= None,
@@ -244,7 +225,6 @@ class NovaHost(WorkItem):
         )
         self.wait_for_creation(response.id)
             
-        return host
 
     def wait_for_creation(self, host_id):
         found = False
