@@ -32,6 +32,7 @@ class Host(object):
 
 class Plan(object):
     server_name='ipa.ayoung'
+    domain_name = '.ayoung'
     router_name = 'rdo-router'
     network_name ='rdo-net'
     subnet_name ='rdo-subnet'
@@ -40,7 +41,9 @@ class Plan(object):
     image = "centos-7-x86_64"
     key= "ayoung-pubkey"
     security_groups = ["default"]
-    
+
+    host_names = ['ipa','rdo']
+
     
 class WorkInProgress(object):
     pass
@@ -72,6 +75,10 @@ class WorkItem(object):
             if flavor.name == flavor_name:
                 return flavor.id
 
+    def list_servers(self):
+        return self.nova.servers.list(
+            search_opts={"name":self.plan.domain_name})
+    
 
     def __init__(self, neutron, nova, plan):
         self.neutron = neutron
@@ -171,17 +178,14 @@ class FloatIP(WorkItem):
         for float in ip_list:
             if float.instance_id == None:
                 break
-        for server in self.nova.servers.list():
-            if server.name == self.plan.server_name:
-                break
-        print (" Assigning %s to host id %s" % (float.ip, server.id) )
-
-        try:
-            server.add_floating_ip(float.ip)
-        except nova_exceptions.BadRequest:
-            print ("IP assign failed. Waiting 5 seconds to try again.")
-            time.sleep(5)
-            server.add_floating_ip(float.ip)
+        for server in self.list_servers():
+            print (" Assigning %s to host id %s" % (float.ip, server.id) )
+            try:
+                server.add_floating_ip(float.ip)
+            except nova_exceptions.BadRequest:
+                print ("IP assign failed. Waiting 5 seconds to try again.")
+                time.sleep(5)
+                server.add_floating_ip(float.ip)
 
 
     def display(self):
@@ -194,28 +198,23 @@ class FloatIP(WorkItem):
                 print (float.ip)
 
     def cleanup(self):
-        for server in self.nova.servers.list():
-            if server.name == self.plan.server_name:
-                break
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                break
-
-        print (" Removing  %s from host id %s" % (float.ip, server.id) )
-        server.remove_floating_ip(float)
-
-
+        for server in self.list_servers():
+            for float in self.nova.floating_ips.list():
+                if float.instance_id == server.id:
+                    print ("Removing  %s from host id %s"
+                           % (float.ip, server.id))
+                    server.remove_floating_ip(float)
+                    break
 
 
 class NovaHost(WorkItem):
-
-    def _host(self):
+    def _host(self, name):
         host = Host()
         host.flavor = self.plan.flavor
         host.image = self.plan.image
         host.key= self.plan.key
         host.security_groups = self.plan.security_groups
-        host.name= self.plan.server_name
+        host.name= name + self.plan.domain_name
         host.image_id = self.get_image_id(host.image)
         host.flavor_id = self.get_flavor_id(host.flavor)
         host.nics = []
@@ -223,25 +222,8 @@ class NovaHost(WorkItem):
         for network in self._networks_response()['networks']:
             host.nics.append({'net-id': network['id']})
 
-        return host
-
-    def wait_for_creation(self, host_id):
-        found = False
-        while not found:
-            try:
-                self.nova.servers.get(host_id)
-                found = True
-                print ("Host %s created" % host_id)
-            except Exception as e:
-                print (".")
-                pass
-
-
-    def create(self):
-
-        self._host()
-        host_entry = self._host()
-
+        host_entry = host
+        
         response = self.nova.servers.create(
             host_entry.name,
             host_entry.image_id,
@@ -261,16 +243,35 @@ class NovaHost(WorkItem):
             config_drive= None
         )
         self.wait_for_creation(response.id)
+            
+        return host
+
+    def wait_for_creation(self, host_id):
+        found = False
+        while not found:
+            try:
+                self.nova.servers.get(host_id)
+                found = True
+                print ("Host %s created" % host_id)
+            except Exception as e:
+                print (".")
+                pass
+
+    def create(self):
+        name = "ipa"
+        for name in self.plan.host_names:
+            self._host(name)
+
+
 
     def display(self):
-        for server in self.nova.servers.list():
-            if server.name == self.plan.server_name:
-                print (server)
+        for server in self.list_servers():
+            print (server.name)
 
     def cleanup(self):
-        for server in self.nova.servers.list():
-            if server.name == self.plan.server_name:
-                self.nova.servers.delete(server.id)
+        search_options = {"name":self.plan.domain_name}
+        for server in self.list_servers():
+            self.nova.servers.delete(server.id)
 
 
 class IPAServer(WorkItem):
