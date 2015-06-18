@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import sys
@@ -19,21 +20,55 @@ class Host(object):
     pass
 
 
+
+user_data_template="""
+#cloud-config
+hostname: %(fqdn)s
+fqdn:  %(fqdn)s
+package_upgrade: true
+
+"""
+
+
+ipa_user_data = user_data_template + """
+packages:
+ - ipa-client
+ - ipa-server
+ - bind-dyndb-ldap
+runcmd:
+ - [ rngd, -r, /dev/hwrng]
+ - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, --setup-dns, --forwarder=192.168.52.3, -U]
+"""
+
+rdo_user_data = user_data_template +  """
+packages:
+ - ipa-client
+ - openstack-packstack
+
+"""
+
+
+
 class Plan(object):
     name='ayoung'
-    domain_name = '.' + name
+    domain_name =  name
     router_name = name + '-router'
     network_name = name + '-net'
     subnet_name = name + '-subnet'
     cidr = "192.168.52.0/24"
     flavor = "m1.medium"
-#    image = "centos-7-x86_64"
     image = "centos-7-cloud"
     key= name + "-pubkey"
     security_groups = ["default"]
-
+    forwarder = "192.168.52.3"
     host_names = ['ipa','rdo']
+    host_data= {
+        "ipa":ipa_user_data,
+        "rdo":rdo_user_data
+    }
 
+
+    
     
 class WorkInProgress(object):
     pass
@@ -201,12 +236,23 @@ class FloatIP(WorkItem):
 
 class NovaHost(WorkItem):
     def _host(self, name):
+        fqdn =   name +'.'+  self.plan.domain_name
+        realm = self.plan.domain_name.upper()
+
         nics = []
         for network in self._networks_response()['networks']:
             nics.append({'net-id': network['id']})
+
+        user_data = self.plan.host_data[name] % {
+            'hostname': name,
+            'fqdn': fqdn,
+            'realm': realm
+        }
+
+        user_data_encoded = base64.b64encode(user_data)
         
         response = self.nova.servers.create(
-            name + self.plan.domain_name,
+            fqdn,
             self.get_image_id(self.plan.image),
             self.get_flavor_id(self.plan.flavor),
             security_groups = self.plan.security_groups,
@@ -216,7 +262,7 @@ class NovaHost(WorkItem):
             reservation_id = None,
             min_count = 1,
             max_count = 1,
-            userdata = None,#host_entry.userdata,
+            userdata = user_data,
             key_name = self.plan.key,
             availability_zone = None,
             block_device_mapping= None,
