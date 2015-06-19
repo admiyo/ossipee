@@ -101,7 +101,7 @@ class Network(WorkItem):
     def display(self):
         print(self._networks_response())
 
-    def cleanup(self):
+    def teardown(self):
         for network in self._networks_response()['networks']:
             self.neutron.delete_network(network['id'])
 
@@ -126,7 +126,7 @@ class SubNet(WorkItem):
     def display(self):
         print (self._subnet_response())
 
-    def cleanup(self):
+    def teardown(self):
         for subnet in self._subnet_response()['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
@@ -145,7 +145,7 @@ class Router(WorkItem):
     def display(self):
         print(self._router_response())
 
-    def cleanup(self):
+    def teardown(self):
         for router in self._router_response()['routers']:
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
@@ -166,7 +166,7 @@ class RouterInterface(WorkItem):
                 except Exception:
                     pass
 
-    def cleanup(self):
+    def teardown(self):
         for router in self._router_response()['routers']:
             for subnet in self._subnet_response()['subnets']:
                 try:
@@ -219,7 +219,7 @@ class FloatIP(WorkItem):
             pass
 
             
-    def cleanup(self):
+    def teardown(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
         self.remove_float_from_server(server)
 
@@ -302,7 +302,7 @@ class NovaHost(WorkItem):
         except Exception:
             pass
 
-    def cleanup(self):
+    def teardown(self):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
 
@@ -376,12 +376,12 @@ class WorkItemList(object):
             print (item.__class__.__name__)
             item.create()
 
-    def cleanup(self):
+    def teardown(self):
         for item in reversed(self.work_items):
             print (item.__class__.__name__)
             
             try:
-                item.cleanup()
+                item.teardown()
             except Exception:
                 pass
             
@@ -462,7 +462,7 @@ def create():
 
 
 def teardown():
-    worker.cleanup()
+    worker.teardown()
 
 
 def display():
