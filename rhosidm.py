@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 import sys
@@ -29,28 +28,8 @@ package_upgrade: true
 
 """
 
-
-ipa_user_data = user_data_template + """
-packages:
- - ipa-client
- - ipa-server
- - bind-dyndb-ldap
-runcmd:
- - [ rngd, -r, /dev/hwrng]
- - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, --setup-dns, --forwarder=192.168.52.3, -U]
-"""
-
-rdo_user_data = user_data_template +  """
-packages:
- - ipa-client
- - openstack-packstack
-
-"""
-
-
-
 class Plan(object):
-    name='ayoung'
+    name=os.environ.get('USER','rdo')
     domain_name =  name
     router_name = name + '-router'
     network_name = name + '-net'
@@ -61,14 +40,7 @@ class Plan(object):
     key= name + "-pubkey"
     security_groups = ["default"]
     forwarder = "192.168.52.3"
-    host_names = ['ipa','rdo']
-    host_data= {
-        "ipa":ipa_user_data,
-        "rdo":rdo_user_data
-    }
 
-
-    
     
 class WorkInProgress(object):
     pass
@@ -102,7 +74,7 @@ class WorkItem(object):
 
     def list_servers(self):
         return self.nova.servers.list(
-            search_opts={"name":self.plan.domain_name})
+            search_opts={"name":self.plan.domain_name + "$"})
     
 
     def __init__(self, neutron, nova, plan):
@@ -235,21 +207,13 @@ class FloatIP(WorkItem):
 
 
 class NovaHost(WorkItem):
-    def _host(self, name):
+    def _host(self, name, user_data):
         fqdn =   name +'.'+  self.plan.domain_name
-        realm = self.plan.domain_name.upper()
 
         nics = []
         for network in self._networks_response()['networks']:
             nics.append({'net-id': network['id']})
 
-        user_data = self.plan.host_data[name] % {
-            'hostname': name,
-            'fqdn': fqdn,
-            'realm': realm
-        }
-
-        user_data_encoded = base64.b64encode(user_data)
         
         response = self.nova.servers.create(
             fqdn,
@@ -283,27 +247,71 @@ class NovaHost(WorkItem):
                 print (".")
                 pass
 
+    #  Over ride this to create a subset of the hosts
+    def host_name_list(self):
+        return self.plan.host_names
+
+    def user_data(self):
+        fqdn =   self.host_name() +'.'+  self.plan.domain_name 
+        realm = self.plan.domain_name.upper()        
+        data = self.user_data_template() % {
+            'hostname': self.host_name(),
+            'fqdn': fqdn,
+            'realm': realm
+        }
+        return data
+
+    
+    def host_list(self):
+        fqdn =   self.host_name() +'.'+  self.plan.domain_name 
+        for host in self.nova.servers.list(search_opts={"name":fqdn}):
+            yield host
+
     def create(self):
-        name = "ipa"
-        for name in self.plan.host_names:
-            self._host(name)
-
-
+        self._host(self.host_name(), self.user_data())
 
     def display(self):
-        for server in self.list_servers():
-            print (server.name)
+        try:
+            for server in self.host_list():
+                print (server.name)
+        except Exception:
+            pass
 
     def cleanup(self):
-        search_options = {"name":self.plan.domain_name}
-        for server in self.list_servers():
+        for server in self.host_list():
             self.nova.servers.delete(server.id)
 
 
-class IPAServer(WorkItem):
-    pass
-    #ansible rdo -i ~/.ossipee/inventory.ini -u centos --sudo -m yum -a "name=ipa-server state=present"
+class IPAServer(NovaHost):
 
+    def user_data_template(self):
+        return user_data_template + """
+packages:
+ - ipa-client
+ - ipa-server
+ - bind-dyndb-ldap
+runcmd:
+ - [ rngd, -r, /dev/hwrng]
+ - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, --setup-dns, --forwarder=192.168.52.3, -U]
+"""
+    
+    def host_name(self):
+        return "ipa"
+
+class RDOServer(NovaHost):
+
+    def user_data_template(self):
+        return user_data_template + """
+packages:
+ - ipa-client
+ - openstack-packstack
+
+"""
+
+    def host_name(self):
+        return "rdo"
+
+    
 _auth = None
 _session = None
 
@@ -348,7 +356,9 @@ class Worklist(object):
 
         neutron.format = 'json'
         work_item_classes = [
-            Router, Network, SubNet, RouterInterface, NovaHost,
+            Router, Network, SubNet, RouterInterface,
+            IPAServer,
+            RDOServer,
             FloatIP
         ]
 
@@ -359,10 +369,13 @@ class Worklist(object):
 
     def create(self):
         for item in self.work_items:
+            print (item.__class__.__name__)
             item.create()
 
     def teardown(self):
         for item in reversed(self.work_items):
+            print (item.__class__.__name__)
+
             try:
                 item.cleanup()
             except Exception:
@@ -370,6 +383,7 @@ class Worklist(object):
 
     def display(self):
         for item in self.work_items:
+            print (item.__class__.__name__)
             item.display()
 
 def enable_logging():
