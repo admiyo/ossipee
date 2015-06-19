@@ -36,6 +36,7 @@ class Plan(object):
     security_groups = ["default"]
     forwarder = "192.168.52.3"
 
+status = dict()
 
 class WorkInProgress(object):
     pass
@@ -71,10 +72,19 @@ class WorkItem(object):
         return self.nova.servers.list(
             search_opts={"name": self.plan.domain_name + "$"})
 
+    def get_server_by_name(self, name):
+        
+        servers = self.nova.servers.list(
+            search_opts={"name": "^" + name + "$"})
+        return servers[0]
+    
     def __init__(self, neutron, nova, plan):
         self.neutron = neutron
         self.nova = nova
         self.plan = plan
+
+    def make_fqdn(self, name):
+        return name + '.' + self.plan.domain_name
 
 
 class Network(WorkItem):
@@ -82,10 +92,11 @@ class Network(WorkItem):
         return self.neutron.list_networks(name=self.plan.network_name)
 
     def create(self):
-        self.neutron.create_network(
+        network = self.neutron.create_network(
             {'network':
              {'name': self.plan.network_name,
               'admin_state_up': True}})
+        status['network'] = network
 
     def display(self):
         print(self._networks_response())
@@ -110,6 +121,7 @@ class SubNet(WorkItem):
                     }
                 ]
             })
+        status['subnet'] = subnet
 
     def display(self):
         print (self._subnet_response())
@@ -172,32 +184,53 @@ class FloatIP(WorkItem):
                 return float
         return None
 
+    def assign_next_ip(self, server):
+        try:
+            float = self.next_float_ip()
+            print (" Assigning %s to host id %s" % (float.ip, server.id))
+            server.add_floating_ip(float.ip)
+        except nova_exceptions.BadRequest:
+            print ("IP assign failed. Waiting 5 seconds to try again.")
+            time.sleep(5)
+            server.add_floating_ip(float.ip)
+
+    def display_ip_for_server(self, server):
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                print (float.ip)
+
+    def remove_float_from_server(self, server):
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                print ("Removing  %s from host id %s"
+                       % (float.ip, server.id))
+                server.remove_floating_ip(float)
+                break
+                
     def create(self):
-        for server in self.list_servers():
-            try:
-                float = self.next_float_ip()
-                print (" Assigning %s to host id %s" % (float.ip, server.id))
-                server.add_floating_ip(float.ip)
-            except nova_exceptions.BadRequest:
-                print ("IP assign failed. Waiting 5 seconds to try again.")
-                time.sleep(5)
-                server.add_floating_ip(float.ip)
+        server = self.get_server_by_name(self.make_fqdn(self.host_name))
+        self.assign_next_ip(server)
 
     def display(self):
-        for server in self.list_servers():
-            for float in self.nova.floating_ips.list():
-                if float.instance_id == server.id:
-                    print (float.ip)
+        try:
+            server = self.get_server_by_name(self.make_fqdn(self.host_name))
+            self.display_ip_for_server(server)
+        except IndexError:
+            pass
 
+            
     def cleanup(self):
-        for server in self.list_servers():
-            for float in self.nova.floating_ips.list():
-                if float.instance_id == server.id:
-                    print ("Removing  %s from host id %s"
-                           % (float.ip, server.id))
-                    server.remove_floating_ip(float)
-                    break
+        server = self.get_server_by_name(self.make_fqdn(self.host_name))
+        self.remove_float_from_server(server)
 
+
+class IPAFloatIP(FloatIP):
+    host_name = "ipa"
+
+class RDOFloatIP(FloatIP):
+    host_name = "rdo"
+
+    
 
 class NovaHost(WorkItem):
     def _host(self, name, user_data):
@@ -224,15 +257,16 @@ class NovaHost(WorkItem):
             scheduler_hints=None,
             config_drive=None
         )
-        self.wait_for_creation(response.id)
+        return self.wait_for_creation(response.id)
 
     def wait_for_creation(self, host_id):
         found = False
         while not found:
             try:
-                self.nova.servers.get(host_id)
+                host = self.nova.servers.get(host_id)
                 found = True
                 print ("Host %s created" % host_id)
+                return host
             except Exception as e:
                 print (".")
                 pass
@@ -258,8 +292,9 @@ class NovaHost(WorkItem):
             yield host
 
     def create(self):
-        self._host(self.host_name(), self.user_data())
-
+        host = self._host(self.host_name(), self.user_data())
+        status [self.host_name()] = host
+        
     def display(self):
         try:
             for server in self.host_list():
@@ -282,25 +317,87 @@ packages:
  - bind-dyndb-ldap
 runcmd:
  - [ rngd, -r, /dev/hwrng]
- - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, --setup-dns, --forwarder=192.168.52.3, -U]
+ - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, 
+     FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, 
+     --setup-dns, --forwarder=192.168.52.3, -U]
 """
 
     def host_name(self):
         return "ipa"
 
-
+    
 class RDOServer(NovaHost):
 
     def user_data_template(self):
-        return user_data_template + """
+
+        resolve_data = """
+manage-resolv-conf: true
+
+resolv_conf:
+  nameservers: ['192.168.52.2']
+  searchdomains:
+    - foo.example.com
+    - bar.example.com
+  domain: example.com
+  options:
+    rotate: true
+    timeout: 1
+"""          
+        return user_data_template +  """
+
+runcmd:
+ - [yum, install, -y, https://rdo.fedorapeople.org/openstack-juno/rdo-release-juno.rpm]
+
 packages:
  - ipa-client
+ - epel-release
  - openstack-packstack
+ 
 
 """
+    def create(self):        
+        super(RDOServer,self).create()
 
+    
     def host_name(self):
         return "rdo"
+
+
+class WorkItemList(object):
+
+    def __init__(self, work_item_classes, neutron, nova, plan):
+        
+        self.work_items = []
+        for item_class in work_item_classes:
+            self.work_items.append(item_class(neutron, nova, plan))
+
+    def create(self):
+        for item in self.work_items:
+            print (item.__class__.__name__)
+            item.create()
+
+    def cleanup(self):
+        for item in reversed(self.work_items):
+            print (item.__class__.__name__)
+            
+            try:
+                item.cleanup()
+            except Exception:
+                pass
+            
+    def display(self):
+        for item in self.work_items:
+            print (item.__class__.__name__)
+            item.display()
+
+class IPA(WorkItemList):
+    def __init__(self, neutron, nova, plan):  
+        super(IPA, self).__init__([IPAServer, IPAFloatIP], neutron, nova, plan)
+
+            
+class RDO(WorkItemList):
+    def __init__(self, neutron, nova, plan):  
+        super(RDO, self).__init__([RDOServer, RDOFloatIP], neutron, nova, plan)
 
 
 _auth = None
@@ -334,47 +431,26 @@ def create_session():
         session = ksc_session.Session(auth=get_auth())
         return session
 
+        
+def build_work_item_list(work_item_classes):
+    plan = Plan()
+    session = create_session()
+    keystone = keystone_v3.Client(session=session)
+    nova = novaclient.Client('2', session=session)
+    neutron = neutronclient.Client('2.0', session=session)
+    
+    neutron.format = 'json'
+    
+    return WorkItemList(work_item_classes, neutron, nova, plan)
 
-class Worklist(object):
-    def __init__(self):
+            
+worker = build_work_item_list([
+    Router, Network, SubNet, RouterInterface,
+    IPA,
+    RDO,
+])
 
-        plan = Plan()
-        session = create_session()
-        keystone = keystone_v3.Client(session=session)
-        nova = novaclient.Client('2', session=session)
-        neutron = neutronclient.Client('2.0', session=session)
 
-        neutron.format = 'json'
-        work_item_classes = [
-            Router, Network, SubNet, RouterInterface,
-            IPAServer,
-            RDOServer,
-            FloatIP
-        ]
-
-        self.work_items = []
-
-        for item_class in work_item_classes:
-            self.work_items.append(item_class(neutron, nova, plan))
-
-    def create(self):
-        for item in self.work_items:
-            print (item.__class__.__name__)
-            item.create()
-
-    def teardown(self):
-        for item in reversed(self.work_items):
-            print (item.__class__.__name__)
-
-            try:
-                item.cleanup()
-            except Exception:
-                pass
-
-    def display(self):
-        for item in self.work_items:
-            print (item.__class__.__name__)
-            item.display()
 
 
 def enable_logging():
@@ -382,13 +458,13 @@ def enable_logging():
 
 
 def create():
-    Worklist().create()
+    worker.create()
 
 
 def teardown():
-    Worklist().teardown()
+    worker.cleanup()
 
 
 def display():
-    wl = Worklist()
-    wl.display()
+    
+    worker.display()
