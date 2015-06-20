@@ -3,6 +3,9 @@ import logging
 import os
 import sys
 import time
+import yaml
+import collections 
+
 
 from keystoneclient.v3 import client as keystoneclient
 from neutronclient.neutron import client as neutronclient
@@ -14,6 +17,20 @@ from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
 import ansible.runner
 
+resolve_data =    """
+manage-resolv-conf: true
+
+resolv_conf:
+  nameservers: ['192.168.52.2']
+  searchdomains:
+    - foo.example.com
+    - bar.example.com
+  domain: 
+  options:
+    rotate: true
+    timeout: 1
+
+"""
 
 user_data_template = """
 #cloud-config
@@ -22,6 +39,38 @@ fqdn:  %(fqdn)s
 package_upgrade: true
 
 """
+
+rdo_data = user_data_template + """
+
+
+yum_repos:
+    # The name of the repository
+    epel-kilo:
+        # This one is required!
+        baseurl: http://download.fedoraproject.org/pub/epel/7/$basearch
+        enabled: True
+        failovermethod: priority
+        gpgcheck: False
+        gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL
+        name: Extra Packages for Enterprise Linux 7 - Testing
+
+
+    openstack-kilo:
+        name: OpenStack Kilo Repository
+        baseurl: http://repos.fedorapeople.org/repos/openstack/openstack-kilo/el7/
+        skip_if_unavailable: 0
+        enabled: 1
+        gpgcheck: 0
+        gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-RDO-kilo
+
+packages:
+ - ipa-client
+ - epel-release
+ - openstack-packstack
+"""
+
+
+#runcmd: - [yum, install, -y, https://rdo.fedorapeople.org/openstack-juno/rdo-release-juno.rpm]
 
 
 class Plan(object):
@@ -285,7 +334,8 @@ class NovaHost(WorkItem):
         data = self.user_data_template() % {
             'hostname': self.host_name(),
             'fqdn': self.fqdn(),
-            'realm': realm
+            'realm': realm,
+            'domain': self.plan.domain_name
         }
         return data
 
@@ -334,32 +384,9 @@ runcmd:
 class RDOServer(NovaHost):
 
     def user_data_template(self):
-
-        resolve_data = """
-manage-resolv-conf: true
-
-resolv_conf:
-  nameservers: ['192.168.52.2']
-  searchdomains:
-    - foo.example.com
-    - bar.example.com
-  domain: example.com
-  options:
-    rotate: true
-    timeout: 1
-"""
-        return user_data_template +  """
-
-runcmd:
- - [yum, install, -y, https://rdo.fedorapeople.org/openstack-juno/rdo-release-juno.rpm]
-
-packages:
- - ipa-client
- - epel-release
- - openstack-packstack
+        return rdo_data
 
 
-"""
     def create(self):
         super(RDOServer,self).create()
 
