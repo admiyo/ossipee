@@ -2,8 +2,8 @@
 
 import logging
 
-import rhosidm
+import ossipee
 
 logging.basicConfig(level=logging.INFO)
 
-rhosidm.teardown(rhosidm.get_args().worker)
+ossipee.teardown(ossipee.get_args().worker)

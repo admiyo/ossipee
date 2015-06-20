@@ -1,9 +1,9 @@
 #!/usr/bin/python
 
 import logging
-import rhosidm
+import ossipee
 
 logging.basicConfig(level=logging.INFO)
 
-rhosidm.create(rhosidm.get_args().worker)
+ossipee.create(ossipee.get_args().worker)
 

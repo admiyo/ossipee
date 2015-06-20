@@ -2,8 +2,8 @@
 
 import logging
 
-import rhosidm
-#rhosidm.enable_logging()
+import ossipee
+#ossipee.enable_logging()
 
 
-rhosidm.display(rhosidm.get_args().worker)
+ossipee.display(ossipee.get_args().worker)

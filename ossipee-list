@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import rhosidm
+import ossipee
 
 
-rhosidm.list()
+ossipee.list()
