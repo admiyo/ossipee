@@ -5,4 +5,5 @@ import logging
 import rhosidm
 #rhosidm.enable_logging()
 
-rhosidm.display()
+
+rhosidm.display(rhosidm.get_args().worker)

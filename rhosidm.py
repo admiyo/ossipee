@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 import sys
@@ -451,20 +452,39 @@ worker = build_work_item_list([
 ])
 
 
+workers = {
+    "all": build_work_item_list([
+        Router, Network, SubNet, RouterInterface,
+        IPA,  RDO,]),
+    "rdo": build_work_item_list([RDO]),
+    "ipa": build_work_item_list([IPA]),
+    "network": build_work_item_list([Router, Network, SubNet, RouterInterface]),
+}
+
+
+def get_args():
+    parser = argparse.ArgumentParser(description='Display the state of the system.')
+    parser.add_argument('worker', nargs='?', default="all",
+                    help='Worker to execute, defaults to "all"')
+    args = parser.parse_args()
+    return args
+
 
 
 def enable_logging():
     logging.basicConfig(level=logging.DEBUG)
 
 
-def create():
-    worker.create()
+def create(worker="all"):
+    workers[worker].create()
 
 
-def teardown():
-    worker.teardown()
+def teardown(worker="all"):
+    workers[worker].teardown()
 
 
-def display():
-    
-    worker.display()
+def display(worker="all"):
+    workers[worker].display()
+
+def list():
+    print(workers.keys())

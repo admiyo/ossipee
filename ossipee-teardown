@@ -6,4 +6,4 @@ import rhosidm
 
 logging.basicConfig(level=logging.INFO)
 
-rhosidm.teardown()
+rhosidm.teardown(rhosidm.get_args().worker)
