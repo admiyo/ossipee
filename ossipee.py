@@ -74,14 +74,18 @@ class WorkItem(object):
             search_opts={"name": self.plan.domain_name + "$"})
 
     def get_server_by_name(self, name):
-        
+
         servers = self.nova.servers.list(
             search_opts={"name": "^" + name + "$"})
         return servers[0]
-    
-    def __init__(self, neutron, nova, plan):
-        self.neutron = neutron
-        self.nova = nova
+
+    def __init__(self, session, plan):
+
+        self.keystone = keystone_v3.Client(session=session)
+        self.nova = novaclient.Client('2', session=session)
+        self.neutron = neutronclient.Client('2.0', session=session)
+        self.neutron.format = 'json'
+
         self.plan = plan
 
     def make_fqdn(self, name):
@@ -207,7 +211,7 @@ class FloatIP(WorkItem):
                        % (float.ip, server.id))
                 server.remove_floating_ip(float)
                 break
-                
+
     def create(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
         self.assign_next_ip(server)
@@ -219,7 +223,7 @@ class FloatIP(WorkItem):
         except IndexError:
             pass
 
-            
+
     def teardown(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
         self.remove_float_from_server(server)
@@ -231,7 +235,7 @@ class IPAFloatIP(FloatIP):
 class RDOFloatIP(FloatIP):
     host_name = "rdo"
 
-    
+
 
 class NovaHost(WorkItem):
     def _host(self, name, user_data):
@@ -295,7 +299,7 @@ class NovaHost(WorkItem):
     def create(self):
         host = self._host(self.host_name(), self.user_data())
         status [self.host_name()] = host
-        
+
     def display(self):
         try:
             for server in self.host_list():
@@ -318,15 +322,15 @@ packages:
  - bind-dyndb-ldap
 runcmd:
  - [ rngd, -r, /dev/hwrng]
- - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p, 
-     FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s, 
+ - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p,
+     FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s,
      --setup-dns, --forwarder=192.168.52.3, -U]
 """
 
     def host_name(self):
         return "ipa"
 
-    
+
 class RDOServer(NovaHost):
 
     def user_data_template(self):
@@ -343,7 +347,7 @@ resolv_conf:
   options:
     rotate: true
     timeout: 1
-"""          
+"""
         return user_data_template +  """
 
 runcmd:
@@ -353,24 +357,24 @@ packages:
  - ipa-client
  - epel-release
  - openstack-packstack
- 
+
 
 """
-    def create(self):        
+    def create(self):
         super(RDOServer,self).create()
 
-    
+
     def host_name(self):
         return "rdo"
 
 
 class WorkItemList(object):
 
-    def __init__(self, work_item_classes, neutron, nova, plan):
-        
+    def __init__(self, work_item_classes, session, plan):
+
         self.work_items = []
         for item_class in work_item_classes:
-            self.work_items.append(item_class(neutron, nova, plan))
+            self.work_items.append(item_class(session, plan))
 
     def create(self):
         for item in self.work_items:
@@ -380,25 +384,25 @@ class WorkItemList(object):
     def teardown(self):
         for item in reversed(self.work_items):
             print (item.__class__.__name__)
-            
+
             try:
                 item.teardown()
             except Exception:
                 pass
-            
+
     def display(self):
         for item in self.work_items:
             print (item.__class__.__name__)
             item.display()
 
 class IPA(WorkItemList):
-    def __init__(self, neutron, nova, plan):  
-        super(IPA, self).__init__([IPAServer, IPAFloatIP], neutron, nova, plan)
+    def __init__(self, session, plan):
+        super(IPA, self).__init__([IPAServer, IPAFloatIP], session, plan)
 
-            
+
 class RDO(WorkItemList):
-    def __init__(self, neutron, nova, plan):  
-        super(RDO, self).__init__([RDOServer, RDOFloatIP], neutron, nova, plan)
+    def __init__(self, session, plan):
+        super(RDO, self).__init__([RDOServer, RDOFloatIP], session, plan)
 
 
 _auth = None
@@ -432,19 +436,13 @@ def create_session():
         session = ksc_session.Session(auth=get_auth())
         return session
 
-        
+
 def build_work_item_list(work_item_classes):
     plan = Plan()
     session = create_session()
-    keystone = keystone_v3.Client(session=session)
-    nova = novaclient.Client('2', session=session)
-    neutron = neutronclient.Client('2.0', session=session)
-    
-    neutron.format = 'json'
-    
-    return WorkItemList(work_item_classes, neutron, nova, plan)
+    return WorkItemList(work_item_classes, session, plan)
 
-            
+
 worker = build_work_item_list([
     Router, Network, SubNet, RouterInterface,
     IPA,
