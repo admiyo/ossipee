@@ -1,0 +1,14 @@
+---
+- hosts: 127.0.0.1
+  connection: local
+  environment:
+    OS_AUTH_URL: "{{ lookup('env','OS_AUTH_URL') }}"
+    OS_USERNAME: "{{ lookup('env','OS_USERNAME') }}"
+    OS_PASSWORD: "{{ lookup('env','OS_PASSWORD') }}"
+    OS_USER_DOMAIN_NAME: "{{ lookup('env','OS_USER_DOMAIN_NAME') }}"
+    OS_PROJECT_DOMAIN_NAME: "{{ lookup('env','OS_PROJECT_DOMAIN_NAME') }}"
+    OS_PROJECT_NAME: "{{ lookup('env','OS_PROJECT_NAME') }}"
+    
+  tasks:
+    - ossipee:  action=create worker=network
+

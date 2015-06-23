@@ -3,7 +3,7 @@
 import logging
 
 import ossipee
-#ossipee.enable_logging()
 
+logging.basicConfig(level=logging.INFO)
 
 ossipee.display(ossipee.get_args().worker)

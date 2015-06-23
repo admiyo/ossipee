@@ -1,10 +1,21 @@
+#!/usr/bin/python
+
 import argparse
 import logging
 import os
 import sys
 import time
 import yaml
-import collections 
+import collections
+
+import datetime
+import json
+import os
+import shlex
+
+
+
+from ansible.module_utils import basic
 
 
 from keystoneclient.v3 import client as keystoneclient
@@ -25,7 +36,7 @@ resolv_conf:
   searchdomains:
     - foo.example.com
     - bar.example.com
-  domain: 
+  domain:
   options:
     rotate: true
     timeout: 1
@@ -86,11 +97,31 @@ class Plan(object):
     security_groups = ["default"]
     forwarder = "192.168.52.3"
 
-status = dict()
+    def make_fqdn(self, name):
+        return name + '.' + self.domain_name
 
-class WorkInProgress(object):
-    pass
 
+class Scorecard(object):
+    def __init__(self, server_list, plan):
+        self.plan = plan
+        self.hosts = dict()
+        for server in server_list:
+            self.hosts[server.name] = dict()
+            for net in server.addresses:
+                for addr in server.addresses[net]:
+                    if addr['OS-EXT-IPS:type'] == 'fixed':
+                        self.hosts[server.name]["fixed"] = addr['addr']
+                    if addr['OS-EXT-IPS:type'] == 'floating':
+                        self.hosts[server.name]["floating"] = addr['addr']
+
+    def ipa_resolver(self):
+        return self.hosts[self.plan.make_fqdn('ipa')]['fixed']
+
+    def display(self):
+        logging.info("ipa resolver = " + self.ipa_resolver())
+        for host in self.hosts:
+            logging.info(host)
+            logging.info(self.hosts[host])
 
 class WorkItem(object):
     def _external_id(self):
@@ -138,7 +169,7 @@ class WorkItem(object):
         self.plan = plan
 
     def make_fqdn(self, name):
-        return name + '.' + self.plan.domain_name
+        return self.plan.make_fqdn(name)
 
 
 class Network(WorkItem):
@@ -150,10 +181,9 @@ class Network(WorkItem):
             {'network':
              {'name': self.plan.network_name,
               'admin_state_up': True}})
-        status['network'] = network
 
     def display(self):
-        print(self._networks_response())
+        logging.info(self._networks_response())
 
     def teardown(self):
         for network in self._networks_response()['networks']:
@@ -175,10 +205,9 @@ class SubNet(WorkItem):
                     }
                 ]
             })
-        status['subnet'] = subnet
 
     def display(self):
-        print (self._subnet_response())
+        logging.info (self._subnet_response())
 
     def teardown(self):
         for subnet in self._subnet_response()['subnets']:
@@ -186,6 +215,7 @@ class SubNet(WorkItem):
 
 
 class Router(WorkItem):
+
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
@@ -197,7 +227,7 @@ class Router(WorkItem):
             {'network_id': self._external_id()})
 
     def display(self):
-        print(self._router_response())
+        logging.info(self._router_response())
 
     def teardown(self):
         for router in self._router_response()['routers']:
@@ -215,7 +245,7 @@ class RouterInterface(WorkItem):
         for router in self._router_response()['routers']:
             for subnet in self._subnet_response()['subnets']:
                 try:
-                    print("router %s on subnet %s" % (router['id'],
+                    logging.info("router %s on subnet %s" % (router['id'],
                                                       subnet['id']))
                 except Exception:
                     pass
@@ -241,22 +271,22 @@ class FloatIP(WorkItem):
     def assign_next_ip(self, server):
         try:
             float = self.next_float_ip()
-            print (" Assigning %s to host id %s" % (float.ip, server.id))
+            logging.info(" Assigning %s to host id %s" % (float.ip, server.id))
             server.add_floating_ip(float.ip)
         except nova_exceptions.BadRequest:
-            print ("IP assign failed. Waiting 5 seconds to try again.")
+            logging.info("IP assign failed. Waiting 5 seconds to try again.")
             time.sleep(5)
             server.add_floating_ip(float.ip)
 
     def display_ip_for_server(self, server):
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
-                print (float.ip)
+                logging.info (float.ip)
 
     def remove_float_from_server(self, server):
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
-                print ("Removing  %s from host id %s"
+                logging.info("Removing  %s from host id %s"
                        % (float.ip, server.id))
                 server.remove_floating_ip(float)
                 break
@@ -319,10 +349,10 @@ class NovaHost(WorkItem):
             try:
                 host = self.nova.servers.get(host_id)
                 found = True
-                print ("Host %s created" % host_id)
+                logging.info ("Host %s created" % host_id)
                 return host
             except Exception as e:
-                print (".")
+                logging.info (".")
                 pass
 
     #  Over ride this to create a subset of the hosts
@@ -348,18 +378,25 @@ class NovaHost(WorkItem):
 
     def create(self):
         host = self._host(self.host_name(), self.user_data())
-        status [self.host_name()] = host
 
     def display(self):
         try:
             for server in self.host_list():
-                print (server.name)
+                logging.info (server.name)
         except Exception:
             pass
 
     def teardown(self):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
+
+class IPAAddress(WorkItem):
+    def display_static_address(self):
+        scorecard = Scorecard(self.list_servers(), self.plan)
+        scorecard.display()
+
+    def display(self):
+        self.display_static_address()
 
 
 class IPAServer(NovaHost):
@@ -372,13 +409,18 @@ packages:
  - bind-dyndb-ldap
 runcmd:
  - [ rngd, -r, /dev/hwrng]
+"""
+
+
+    def host_name(self):
+        return "ipa"
+
+old_ipa_install_command = """
  - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p,
      FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s,
      --setup-dns, --forwarder=192.168.52.3, -U]
 """
 
-    def host_name(self):
-        return "ipa"
 
 
 class RDOServer(NovaHost):
@@ -405,12 +447,12 @@ class WorkItemList(object):
 
     def create(self):
         for item in self.work_items:
-            print (item.__class__.__name__)
+            logging.info(item.__class__.__name__)
             item.create()
 
     def teardown(self):
         for item in reversed(self.work_items):
-            print (item.__class__.__name__)
+            logging.info(item.__class__.__name__)
 
             try:
                 item.teardown()
@@ -419,7 +461,7 @@ class WorkItemList(object):
 
     def display(self):
         for item in self.work_items:
-            print (item.__class__.__name__)
+            logging.info(item.__class__.__name__)
             item.display()
 
 class IPA(WorkItemList):
@@ -446,7 +488,7 @@ def get_auth():
         OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
 
         if OS_AUTH_URL is None:
-            print ("OS_AUTH_URL not set.  Aborting.")
+            logging.info ("OS_AUTH_URL not set.  Aborting.")
             sys.exit(-1)
 
         auth = v3.Password(auth_url=OS_AUTH_URL,
@@ -484,6 +526,7 @@ workers = {
     "rdo": build_work_item_list([RDO]),
     "ipa": build_work_item_list([IPA]),
     "network": build_work_item_list([Router, Network, SubNet, RouterInterface]),
+    "ipaaddress":build_work_item_list([IPAAddress])
 }
 
 
@@ -512,4 +555,43 @@ def display(worker="all"):
     workers[worker].display()
 
 def list():
-    print(workers.keys())
+    logging.info(json.dumps(workers.keys()))
+
+import sys
+import json
+import os
+import shlex
+
+def main():
+    args_file = sys.argv[1]
+    args_data = file(args_file).read()
+    arguments = shlex.split(args_data)
+    worker = "all"
+    action= WorkItemList.display
+
+    for arg in arguments:
+        # ignore any arguments without an equals in it
+        if "=" in arg:
+            (key, value) = arg.split("=")
+            if key == "worker":
+                worker = workers[value]
+            if key == "action":
+                if value == "create":
+                    action = WorkItemList.create
+                elif value == "teardown":
+                    action = WorkItemList.teardown
+                elif value == "display":
+                    action = WorkItemList.display
+
+
+    logging.basicConfig(level=logging.ERROR)
+    changed = False
+
+    action(worker)
+    print json.dumps({
+        "success" : True,
+        "args": args_data
+    })
+
+if __name__ == "__main__":
+    main()

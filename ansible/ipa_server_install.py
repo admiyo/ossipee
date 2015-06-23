@@ -2,6 +2,7 @@
 
 import os
 import json
+import subprocess
 
 def iparesolver():
     for text in open("/etc/resolv.conf","r"):
@@ -18,6 +19,4 @@ def ipa_install_command():
     return install_command
 
 
-print json.dumps({
-    "command" : ipa_install_command()
-})
+subprocess.call(ipa_install_command())
