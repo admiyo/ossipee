@@ -393,7 +393,6 @@ class NovaHost(WorkItem):
 
     def create(self):
         host = self._host(self.host_name(), self.user_data())
-
     def display(self):
         try:
             for server in self.host_list():
@@ -537,7 +536,7 @@ worker = build_work_item_list([
 workers = {
     "all": build_work_item_list([
         Router, Network, SubNet, RouterInterface,
-        IPA,  RDO,]),
+        IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP]),
     "rdo": build_work_item_list([RDO]),
     "ipa": build_work_item_list([IPA]),
     "network": build_work_item_list([Router, Network, SubNet, RouterInterface]),
