@@ -1,17 +1,17 @@
 #!/usr/bin/python
 
 import argparse
+import collections
+import datetime
+import json
 import logging
 import os
+import shlex
+import subprocess
 import sys
 import time
 import yaml
-import collections
 
-import datetime
-import json
-import os
-import shlex
 
 
 
@@ -243,12 +243,10 @@ class RouterInterface(WorkItem):
 
     def display(self):
         for router in self._router_response()['routers']:
-            for subnet in self._subnet_response()['subnets']:
-                try:
-                    logging.info("router %s on subnet %s" % (router['id'],
-                                                      subnet['id']))
-                except Exception:
-                    pass
+            try:
+                print (self._subnet_response()['subnets'])
+            except Exception:
+                pass
 
     def teardown(self):
         for router in self._router_response()['routers']:
@@ -277,6 +275,7 @@ class FloatIP(WorkItem):
             logging.info("IP assign failed. Waiting 5 seconds to try again.")
             time.sleep(5)
             server.add_floating_ip(float.ip)
+        return float.ip
 
     def display_ip_for_server(self, server):
         for float in self.nova.floating_ips.list():
@@ -291,9 +290,25 @@ class FloatIP(WorkItem):
                 server.remove_floating_ip(float)
                 break
 
+    def reset_ssh(self, ip_address):
+         subprocess.call(["ssh-keygen", "-R", ip_address])
+
+         attempts = 5
+         while(attempts):
+             try:
+                 subprocess.check_call(["ssh", "-o", "StrictHostKeyChecking=no",
+                                  "-l", "centos", ip_address, "hostname"])
+                 attempts = 0
+             except subprocess.CalledProcessError:
+                 logging.info ("ssh to server failed.  Waiting 5 seconds to retry %s.  Attempts left = %d" % (ip_address, attempts))
+                 attempts = attempts -1
+                 time.sleep(5)
+
+
     def create(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
-        self.assign_next_ip(server)
+        ip_address = self.assign_next_ip(server)
+        self.reset_ssh(ip_address)
 
     def display(self):
         try:

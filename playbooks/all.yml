@@ -8,7 +8,8 @@
     OS_USER_DOMAIN_NAME: "{{ lookup('env','OS_USER_DOMAIN_NAME') }}"
     OS_PROJECT_DOMAIN_NAME: "{{ lookup('env','OS_PROJECT_DOMAIN_NAME') }}"
     OS_PROJECT_NAME: "{{ lookup('env','OS_PROJECT_NAME') }}"
-    
+    USERNAME: "{{ lookup('env','USER') }}"
+
   tasks:
     - ossipee:  action=create worker=all
 
