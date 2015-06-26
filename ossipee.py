@@ -28,7 +28,7 @@ from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
 import ansible.runner
 
-resolve_data =    """
+resolve_data =    '''
 manage-resolv-conf: true
 
 resolv_conf:
@@ -41,17 +41,17 @@ resolv_conf:
     rotate: true
     timeout: 1
 
-"""
+'''
 
-user_data_template = """
+user_data_template = '''
 #cloud-config
 hostname: %(fqdn)s
 fqdn:  %(fqdn)s
 package_upgrade: true
 
-"""
+'''
 
-rdo_data = user_data_template + """
+rdo_data = user_data_template + '''
 
 
 yum_repos:
@@ -78,7 +78,7 @@ packages:
  - ipa-client
  - epel-release
  - openstack-packstack
-"""
+'''
 
 
 #runcmd: - [yum, install, -y, https://rdo.fedorapeople.org/openstack-juno/rdo-release-juno.rpm]
@@ -87,15 +87,24 @@ packages:
 class Plan(object):
     name = os.environ.get('USER', 'rdo')
     domain_name = name
-    router_name = name + '-router'
-    network_name = name + '-net'
-    subnet_name = name + '-subnet'
-    cidr = "192.168.52.0/24"
-    flavor = "m1.medium"
-    image = "centos-7-cloud"
-    key = name + "-pubkey"
-    security_groups = ["default"]
-    forwarder = "192.168.52.3"
+
+    networks = {
+        'public': {  
+            'router_name': name + '-public-router',
+            'network_name': name + '-public-net',
+            'subnet_name': name + '-public-subnet',
+            'cidr': '192.168.52.0/24'},
+        'private': {
+            'router_name': name + '-private-router',
+            'network_name': name + '-private-net',
+            'subnet_name': name + '-private-subnet',
+            'cidr': '192.168.178.0/24'},    
+    }
+    flavor = 'm1.medium'
+    image = 'centos-7-cloud'
+    key = name + '-pubkey'
+    security_groups = ['default']
+    forwarder = '192.168.52.3'
 
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
@@ -110,15 +119,15 @@ class Scorecard(object):
             for net in server.addresses:
                 for addr in server.addresses[net]:
                     if addr['OS-EXT-IPS:type'] == 'fixed':
-                        self.hosts[server.name]["fixed"] = addr['addr']
+                        self.hosts[server.name]['fixed'] = addr['addr']
                     if addr['OS-EXT-IPS:type'] == 'floating':
-                        self.hosts[server.name]["floating"] = addr['addr']
+                        self.hosts[server.name]['floating'] = addr['addr']
 
     def ipa_resolver(self):
         return self.hosts[self.plan.make_fqdn('ipa')]['fixed']
 
     def display(self):
-        logging.info("ipa resolver = " + self.ipa_resolver())
+        logging.info('ipa resolver = ' + self.ipa_resolver())
         for host in self.hosts:
             logging.info(host)
             logging.info(self.hosts[host])
@@ -127,17 +136,20 @@ class WorkItem(object):
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
-    def _router_response(self):
-        return self.neutron.list_routers(name=self.plan.router_name)
+    def _router_response(self, which):
+        return self.neutron.list_routers(
+            name=self.plan.networks[which]['router_name'])
 
-    def _networks_response(self):
-        return self.neutron.list_networks(name=self.plan.network_name)
+    def _networks_response(self, which):
+        return self.neutron.list_networks(
+            name=self.plan.networks[which]['network_name'])
 
-    def _subnet_response(self):
-        return self.neutron.list_subnets(name=self.plan.subnet_name)
+    def _subnet_response(self, which):
+        return self.neutron.list_subnets(
+            name=self.plan.networks[which]['subnet_name'])
 
-    def _subnet_id(self):
-        return self._subnet_response()['subnets'][0]['id']
+    def _subnet_id(self, which):
+        return self._subnet_response(which)['subnets'][0]['id']
 
     def get_image_id(self, image_name):
         for image in self.nova.images.list():
@@ -151,12 +163,12 @@ class WorkItem(object):
 
     def list_servers(self):
         return self.nova.servers.list(
-            search_opts={"name": self.plan.domain_name + "$"})
+            search_opts={'name': self.plan.domain_name + '$'})
 
     def get_server_by_name(self, name):
 
         servers = self.nova.servers.list(
-            search_opts={"name": "^" + name + "$"})
+            search_opts={'name': '^' + name + '$'})
         return servers[0]
 
     def __init__(self, session, plan):
@@ -173,13 +185,15 @@ class WorkItem(object):
 
 
 class Network(WorkItem):
+
     def _networks_response(self):
-        return self.neutron.list_networks(name=self.plan.network_name)
+        return self.neutron.list_networks(
+            name=self.plan.networks[self.which]['network_name'])
 
     def create(self):
         network = self.neutron.create_network(
             {'network':
-             {'name': self.plan.network_name,
+             {'name': self.plan.networks[self.which]['network_name'],
               'admin_state_up': True}})
 
     def display(self):
@@ -189,37 +203,50 @@ class Network(WorkItem):
         for network in self._networks_response()['networks']:
             self.neutron.delete_network(network['id'])
 
+class PublicNetwork(Network):
+    which='public'
 
+class PrivateNetwork(Network):
+    which='private'
+
+    
 class SubNet(WorkItem):
 
     def create(self):
-        network = self._networks_response()['networks'][0]
+        network = self._networks_response(self.which)['networks'][0]
         subnet = self.neutron.create_subnet(
             body={
-                "subnets": [
+                'subnets': [
                     {
-                        "name": self.plan.subnet_name,
-                        "cidr": self.plan.cidr,
-                        "ip_version": 4,
-                        "network_id": network['id']
+                        'name': self.plan.networks[self.which]['subnet_name'],
+                        'cidr': self.plan.networks[self.which]['cidr'],
+                        'ip_version': 4,
+                        'network_id': network['id']
                     }
                 ]
             })
 
     def display(self):
-        logging.info (self._subnet_response())
+        logging.info (self._subnet_response(self.which))
 
     def teardown(self):
-        for subnet in self._subnet_response()['subnets']:
+        for subnet in self._subnet_response(self.which)['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
 
-class Router(WorkItem):
+class PublicSubNet(SubNet):
+    which='public'
 
+class PrivateSubNet(SubNet):
+    which='private'
+
+    
+class Router(WorkItem):
+    which="public"
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
-                'name': self.plan.router_name,
+                'name': self.plan.networks[self.which]['router_name'],
                 'admin_state_up': True,
             }})['router']
         self.neutron.add_gateway_router(
@@ -227,33 +254,33 @@ class Router(WorkItem):
             {'network_id': self._external_id()})
 
     def display(self):
-        logging.info(self._router_response())
+        logging.info(self._router_response(self.which))
 
     def teardown(self):
-        for router in self._router_response()['routers']:
+        for router in self._router_response(self.which)['routers']:
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
 
-
 class RouterInterface(WorkItem):
+    which="public"
     def create(self):
         self.neutron.add_interface_router(
-            self._router_response()['routers'][0]['id'],
-            {"subnet_id": self._subnet_id()})
+            self._router_response(self.which)['routers'][0]['id'],
+            {'subnet_id': self._subnet_id(self.which)})
 
     def display(self):
-        for router in self._router_response()['routers']:
+        for router in self._router_response(self.which)['routers']:
             try:
-                print (self._subnet_response()['subnets'])
+                print (self._subnet_response(self.which)['subnets'])
             except Exception:
                 pass
 
     def teardown(self):
-        for router in self._router_response()['routers']:
-            for subnet in self._subnet_response()['subnets']:
+        for router in self._router_response(self.which)['routers']:
+            for subnet in self._subnet_response(self.which)['subnets']:
                 try:
                     self.neutron.remove_interface_router(
-                        router['id'], {"subnet_id": subnet['id']})
+                        router['id'], {'subnet_id': subnet['id']})
                 except Exception:
                     pass
 
@@ -269,10 +296,10 @@ class FloatIP(WorkItem):
     def assign_next_ip(self, server):
         try:
             float = self.next_float_ip()
-            logging.info(" Assigning %s to host id %s" % (float.ip, server.id))
+            logging.info(' Assigning %s to host id %s' % (float.ip, server.id))
             server.add_floating_ip(float.ip)
         except nova_exceptions.BadRequest:
-            logging.info("IP assign failed. Waiting 5 seconds to try again.")
+            logging.info('IP assign failed. Waiting 5 seconds to try again.')
             time.sleep(5)
             server.add_floating_ip(float.ip)
         return float.ip
@@ -285,22 +312,25 @@ class FloatIP(WorkItem):
     def remove_float_from_server(self, server):
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
-                logging.info("Removing  %s from host id %s"
+                logging.info('Removing  %s from host id %s'
                        % (float.ip, server.id))
                 server.remove_floating_ip(float)
                 break
 
     def reset_ssh(self, ip_address):
-         subprocess.call(["ssh-keygen", "-R", ip_address])
+         subprocess.call(['ssh-keygen', '-R', ip_address])
 
          attempts = 5
          while(attempts):
              try:
-                 subprocess.check_call(["ssh", "-o", "StrictHostKeyChecking=no",
-                                  "-l", "centos", ip_address, "hostname"])
+                 subprocess.check_call(
+                     ['ssh',
+                      '-o', 'StrictHostKeyChecking=no',
+                      '-o', 'PasswordAuthentication=no',
+                                  '-l', 'centos', ip_address, 'hostname'])
                  attempts = 0
              except subprocess.CalledProcessError:
-                 logging.info ("ssh to server failed.  Waiting 5 seconds to retry %s.  Attempts left = %d" % (ip_address, attempts))
+                 logging.info ('ssh to server failed.  Waiting 5 seconds to retry %s.  Attempts left = %d' % (ip_address, attempts))
                  attempts = attempts -1
                  time.sleep(5)
 
@@ -324,10 +354,10 @@ class FloatIP(WorkItem):
 
 
 class IPAFloatIP(FloatIP):
-    host_name = "ipa"
+    host_name = 'ipa'
 
 class RDOFloatIP(FloatIP):
-    host_name = "rdo"
+    host_name = 'rdo'
 
 
 
@@ -335,8 +365,9 @@ class NovaHost(WorkItem):
     def _host(self, name, user_data):
 
         nics = []
-        for network in self._networks_response()['networks']:
-            nics.append({'net-id': network['id']})
+        for which in ["public", "private"]:
+            for network in self._networks_response(which)['networks']:
+                nics.append({'net-id': network['id']})
 
         response = self.nova.servers.create(
             self.fqdn(),
@@ -364,10 +395,10 @@ class NovaHost(WorkItem):
             try:
                 host = self.nova.servers.get(host_id)
                 found = True
-                logging.info ("Host %s created" % host_id)
+                logging.info ('Host %s created' % host_id)
                 return host
             except Exception as e:
-                logging.info (".")
+                logging.info ('.')
                 pass
 
     #  Over ride this to create a subset of the hosts
@@ -388,7 +419,7 @@ class NovaHost(WorkItem):
         return self.host_name() + '.' + self.plan.domain_name
 
     def host_list(self):
-        for host in self.nova.servers.list(search_opts={"name": self.fqdn()}):
+        for host in self.nova.servers.list(search_opts={'name': self.fqdn()}):
             yield host
 
     def create(self):
@@ -416,24 +447,23 @@ class IPAAddress(WorkItem):
 class IPAServer(NovaHost):
 
     def user_data_template(self):
-        return user_data_template + """
+        return user_data_template + '''
 packages:
  - ipa-client
  - ipa-server
  - bind-dyndb-ldap
 runcmd:
- - [ rngd, -r, /dev/hwrng]
-"""
+'''
 
 
     def host_name(self):
-        return "ipa"
+        return 'ipa'
 
-old_ipa_install_command = """
+old_ipa_install_command = '''
  - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p,
      FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s,
      --setup-dns, --forwarder=192.168.52.3, -U]
-"""
+'''
 
 
 
@@ -448,7 +478,7 @@ class RDOServer(NovaHost):
 
 
     def host_name(self):
-        return "rdo"
+        return 'rdo'
 
 
 class WorkItemList(object):
@@ -487,7 +517,18 @@ class RDO(WorkItemList):
     def __init__(self, session, plan):
         super(RDO, self).__init__([RDOServer, RDOFloatIP], session, plan)
 
+class PublicNetworkList(WorkItemList):
+    def __init__(self, session, plan):
+        super(PublicNetworkList, self).__init__(
+            [Router, PublicNetwork, PublicSubNet, RouterInterface],
+            session, plan)
 
+class PrivateNetworkList(WorkItemList):
+    def __init__(self, session, plan):
+        super(PrivateNetworkList, self).__init__(
+            [PrivateNetwork, PrivateSubNet], session, plan)
+
+        
 _auth = None
 _session = None
 
@@ -502,7 +543,7 @@ def get_auth():
         OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
 
         if OS_AUTH_URL is None:
-            logging.info ("OS_AUTH_URL not set.  Aborting.")
+            logging.info ('OS_AUTH_URL not set.  Aborting.')
             sys.exit(-1)
 
         auth = v3.Password(auth_url=OS_AUTH_URL,
@@ -527,27 +568,26 @@ def build_work_item_list(work_item_classes):
 
 
 worker = build_work_item_list([
-    Router, Network, SubNet, RouterInterface,
+    PublicNetwork,
     IPA,
     RDO,
 ])
 
 
 workers = {
-    "all": build_work_item_list([
-        Router, Network, SubNet, RouterInterface,
+    'all': build_work_item_list([
+        PublicNetworkList,
         IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP]),
-    "rdo": build_work_item_list([RDO]),
-    "ipa": build_work_item_list([IPA]),
-    "network": build_work_item_list([Router, Network, SubNet, RouterInterface]),
-    "ipaaddress":build_work_item_list([IPAAddress])
+    'rdo': build_work_item_list([RDO]),
+    'ipa': build_work_item_list([IPA]),
+    'network': build_work_item_list([PrivateNetworkList, PublicNetworkList])
 }
 
 
 def get_args():
     parser = argparse.ArgumentParser(description='Display the state of the system.')
-    parser.add_argument('worker', nargs='?', default="all",
-                    help='Worker to execute, defaults to "all"')
+    parser.add_argument('worker', nargs='?', default='all',
+                        help='Worker to execute, defaults to "all"')
     args = parser.parse_args()
     return args
 
@@ -557,15 +597,15 @@ def enable_logging():
     logging.basicConfig(level=logging.DEBUG)
 
 
-def create(worker="all"):
+def create(worker='all'):
     workers[worker].create()
 
 
-def teardown(worker="all"):
+def teardown(worker='all'):
     workers[worker].teardown()
 
 
-def display(worker="all"):
+def display(worker='all'):
     workers[worker].display()
 
 def list():
@@ -580,21 +620,21 @@ def main():
     args_file = sys.argv[1]
     args_data = file(args_file).read()
     arguments = shlex.split(args_data)
-    worker = "all"
+    worker = 'all'
     action= WorkItemList.display
 
     for arg in arguments:
         # ignore any arguments without an equals in it
-        if "=" in arg:
-            (key, value) = arg.split("=")
-            if key == "worker":
+        if '=' in arg:
+            (key, value) = arg.split('=')
+            if key == 'worker':
                 worker = workers[value]
-            if key == "action":
-                if value == "create":
+            if key == 'action':
+                if value == 'create':
                     action = WorkItemList.create
-                elif value == "teardown":
+                elif value == 'teardown':
                     action = WorkItemList.teardown
-                elif value == "display":
+                elif value == 'display':
                     action = WorkItemList.display
 
 
@@ -603,9 +643,9 @@ def main():
 
     action(worker)
     print json.dumps({
-        "success" : True,
-        "args": args_data
+        'success' : True,
+        'args': args_data
     })
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
