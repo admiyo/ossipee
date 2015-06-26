@@ -1,8 +1,6 @@
 #!/usr/bin/python
 
 import argparse
-import collections
-import datetime
 import json
 import logging
 import os
@@ -10,13 +8,8 @@ import shlex
 import subprocess
 import sys
 import time
-import yaml
 
 
-from ansible.module_utils import basic
-
-
-from keystoneclient.v3 import client as keystoneclient
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
@@ -24,9 +17,8 @@ from novaclient import exceptions as nova_exceptions
 from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
-import ansible.runner
 
-resolve_data =    '''
+resolve_data = '''
 manage-resolv-conf: true
 
 resolv_conf:
@@ -66,7 +58,10 @@ yum_repos:
 
     openstack-kilo:
         name: OpenStack Kilo Repository
-        baseurl: http://repos.fedorapeople.org/repos/openstack/openstack-kilo/el7/
+""" +
+"        baseurl: http://repos.fedorapeople.org/repos/openstack/"+
+"openstack-kilo/el7/"+
+"""
         skip_if_unavailable: 0
         enabled: 1
         gpgcheck: 0
@@ -79,17 +74,17 @@ packages:
 '''
 
 
-#runcmd: - [yum, install, -y, https://rdo.fedorapeople.org/openstack-juno/rdo-release-juno.rpm]
-
-
 class Plan(object):
     name = os.environ.get('USER', 'rdo')
 #    name = "oidc"
-    username =   os.environ.get('USER', 'rdo')
+    config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
+    inventory_dir = config_dir + "/inventory/"
+    inventory_file = inventory_dir + name + ".ini"
+    username = os.environ.get('USER', 'rdo')
     domain_name = name
 
     networks = {
-        'public': {  
+        'public': {
             'router_name': name + '-public-router',
             'network_name': name + '-public-net',
             'subnet_name': name + '-public-subnet',
@@ -98,7 +93,7 @@ class Plan(object):
             'router_name': name + '-private-router',
             'network_name': name + '-private-net',
             'subnet_name': name + '-private-subnet',
-            'cidr': '192.168.178.0/24'},    
+            'cidr': '192.168.178.0/24'},
     }
     flavor = 'm1.medium'
     image = 'centos-7-cloud'
@@ -131,6 +126,7 @@ class Scorecard(object):
         for host in self.hosts:
             logging.info(host)
             logging.info(self.hosts[host])
+
 
 class WorkItem(object):
     def _external_id(self):
@@ -171,6 +167,11 @@ class WorkItem(object):
             search_opts={'name': '^' + name + '$'})
         return servers[0]
 
+    def floating_ip_for_server(self, server):
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                return (float.ip)
+
     def __init__(self, session, plan):
 
         self.keystone = keystone_v3.Client(session=session)
@@ -195,6 +196,7 @@ class Network(WorkItem):
             {'network':
              {'name': self.plan.networks[self.which]['network_name'],
               'admin_state_up': True}})
+        logging.info(network)
 
     def display(self):
         logging.info(self._networks_response())
@@ -203,13 +205,15 @@ class Network(WorkItem):
         for network in self._networks_response()['networks']:
             self.neutron.delete_network(network['id'])
 
+
 class PublicNetwork(Network):
-    which='public'
+    which = 'public'
+
 
 class PrivateNetwork(Network):
-    which='private'
+    which = 'private'
 
-    
+
 class SubNet(WorkItem):
 
     def create(self):
@@ -225,9 +229,10 @@ class SubNet(WorkItem):
                     }
                 ]
             })
+        logging.info(subnet)
 
     def display(self):
-        logging.info (self._subnet_response(self.which))
+        logging.info(self._subnet_response(self.which))
 
     def teardown(self):
         for subnet in self._subnet_response(self.which)['subnets']:
@@ -235,14 +240,16 @@ class SubNet(WorkItem):
 
 
 class PublicSubNet(SubNet):
-    which='public'
+    which = 'public'
+
 
 class PrivateSubNet(SubNet):
-    which='private'
+    which = 'private'
 
-    
+
 class Router(WorkItem):
-    which="public"
+    which = "public"
+
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
@@ -261,8 +268,10 @@ class Router(WorkItem):
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
 
+
 class RouterInterface(WorkItem):
-    which="public"
+    which = "public"
+
     def create(self):
         self.neutron.add_interface_router(
             self._router_response(self.which)['routers'][0]['id'],
@@ -305,35 +314,34 @@ class FloatIP(WorkItem):
         return float.ip
 
     def display_ip_for_server(self, server):
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                logging.info (float.ip)
+        logging.info(self.floating_ip_for_server(server))
 
     def remove_float_from_server(self, server):
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
                 logging.info('Removing  %s from host id %s'
-                       % (float.ip, server.id))
+                             % (float.ip, server.id))
                 server.remove_floating_ip(float)
                 break
 
     def reset_ssh(self, ip_address):
-         subprocess.call(['ssh-keygen', '-R', ip_address])
-
-         attempts = 5
-         while(attempts):
-             try:
-                 subprocess.check_call(
-                     ['ssh',
-                      '-o', 'StrictHostKeyChecking=no',
-                      '-o', 'PasswordAuthentication=no',
-                                  '-l', 'centos', ip_address, 'hostname'])
-                 attempts = 0
-             except subprocess.CalledProcessError:
-                 logging.info ('ssh to server failed.  Waiting 5 seconds to retry %s.  Attempts left = %d' % (ip_address, attempts))
-                 attempts = attempts -1
-                 time.sleep(5)
-
+        subprocess.call(['ssh-keygen', '-R', ip_address])
+        attempts = 5
+        while(attempts):
+            try:
+                subprocess.check_call(
+                    ['ssh',
+                     '-o', 'StrictHostKeyChecking=no',
+                     '-o', 'PasswordAuthentication=no',
+                     '-l', 'centos', ip_address, 'hostname'])
+                attempts = 0
+            except subprocess.CalledProcessError:
+                logging.info(
+                    'ssh to server failed.' +
+                    '  Waiting 5 seconds to retry %s.' % ip_address +
+                    '  Attempts left = %d' , attempts)
+                attempts = attempts - 1
+                time.sleep(5)
 
     def create(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
@@ -347,20 +355,16 @@ class FloatIP(WorkItem):
         except IndexError:
             pass
 
-
     def teardown(self):
         server = self.get_server_by_name(self.make_fqdn(self.host_name))
         self.remove_float_from_server(server)
 
 
-
-
-
 class NovaHost(WorkItem):
 
-    #Override this if the host needs more complex userdata
+    # Override this if the host needs more complex userdata
     def user_data_template(self):
-        return user_data_template 
+        return user_data_template
 
     def _host(self, name, user_data):
 
@@ -395,10 +399,10 @@ class NovaHost(WorkItem):
             try:
                 host = self.nova.servers.get(host_id)
                 found = True
-                logging.info ('Host %s created' % host_id)
+                logging.info('Host %s created' % host_id)
                 return host
-            except Exception as e:
-                logging.info ('.')
+            except Exception:
+                logging.info('.')
                 pass
 
     #  Over ride this to create a subset of the hosts
@@ -424,16 +428,19 @@ class NovaHost(WorkItem):
 
     def create(self):
         host = self._host(self.host_name(), self.user_data())
+        logging.info(host)
+
     def display(self):
         try:
             for server in self.host_list():
-                logging.info (server.name)
+                logging.info(server.name)
         except Exception:
             pass
 
     def teardown(self):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
+
 
 class IPAAddress(WorkItem):
     def display_static_address(self):
@@ -443,7 +450,51 @@ class IPAAddress(WorkItem):
     def display(self):
         self.display_static_address()
 
-    
+
+class Inventory(WorkItem):
+    def create(self):
+        if not os.path.exists(self.plan.inventory_dir):
+            os.makedirs(self.plan.inventory_dir)
+        with open(self.plan.inventory_file, 'w') as f:
+            for host in ["ipa", "rdo", "openidc"]:
+                f.write("[%s]\n" % host)
+                try:
+                    server = self.get_server_by_name(self.make_fqdn(host))
+                    ip = self.floating_ip_for_server(server)
+                    f.write("%s\n" % ip)
+                except IndexError:
+                    pass
+
+    def display(self):
+        try:
+            with open(self.plan.inventory_file, 'r')as f:
+                read_data = f.read()
+                print(read_data)
+
+        except IOError as ioerror:
+            if not os.path.exists(self.plan.inventory_dir):
+                print("Inventory Directory %s does not exist" %
+                      self.plan.inventory_dir)
+                return
+
+            if not os.path.isdir(self.plan.inventory_dir):
+                print("%s exists but is not a directory" %
+                      self.plan.inventory_dir)
+                return
+
+            if not os.path.exists(self.plan.inventory_file):
+                print("Inventory File %s does not exist" %
+                      self.plan.inventory_file)
+                return
+
+            print("Error reading inventory file")
+            print(ioerror)
+
+    def teardown(self):
+        if os.path.exists(self.plan.inventory_file):
+            os.remove(self.plan.inventory_file)
+
+
 class WorkItemList(object):
 
     def __init__(self, work_item_classes, session, plan):
@@ -475,15 +526,19 @@ class WorkItemList(object):
 class IPAFloatIP(FloatIP):
     host_name = 'ipa'
 
+
 class RDOFloatIP(FloatIP):
     host_name = 'rdo'
+
 
 class OpenIDCFloatIP(FloatIP):
     host_name = 'openidc'
 
+
 class IPAServer(NovaHost):
     def host_name(self):
         return 'ipa'
+
 
 class RDOServer(NovaHost):
 
@@ -493,11 +548,13 @@ class RDOServer(NovaHost):
     def host_name(self):
         return 'rdo'
 
+
 class OpenIDCServer(NovaHost):
 
     def host_name(self):
         return 'openidc'
-            
+
+
 class IPA(WorkItemList):
     def __init__(self, session, plan):
         super(IPA, self).__init__([IPAServer, IPAFloatIP], session, plan)
@@ -507,24 +564,26 @@ class RDO(WorkItemList):
     def __init__(self, session, plan):
         super(RDO, self).__init__([RDOServer, RDOFloatIP], session, plan)
 
+
 class OpenIDC(WorkItemList):
     def __init__(self, session, plan):
         super(OpenIDC, self).__init__([OpenIDCServer, OpenIDCFloatIP],
                                       session, plan)
 
-        
+
 class PublicNetworkList(WorkItemList):
     def __init__(self, session, plan):
         super(PublicNetworkList, self).__init__(
             [Router, PublicNetwork, PublicSubNet, RouterInterface],
             session, plan)
 
+
 class PrivateNetworkList(WorkItemList):
     def __init__(self, session, plan):
         super(PrivateNetworkList, self).__init__(
             [PrivateNetwork, PrivateSubNet], session, plan)
 
-        
+
 _auth = None
 _session = None
 
@@ -539,7 +598,7 @@ def get_auth():
         OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
 
         if OS_AUTH_URL is None:
-            logging.info ('OS_AUTH_URL not set.  Aborting.')
+            logging.error('OS_AUTH_URL not set.  Aborting.')
             sys.exit(-1)
 
         auth = v3.Password(auth_url=OS_AUTH_URL,
@@ -562,33 +621,32 @@ def build_work_item_list(work_item_classes):
     session = create_session()
     return WorkItemList(work_item_classes, session, plan)
 
-
 worker = build_work_item_list([
     PublicNetwork,
     IPA,
-    RDO,
+    RDO
 ])
 
 
 workers = {
     'all': build_work_item_list([
         PrivateNetworkList, PublicNetworkList,
-        IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP]),
+        IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP, Inventory]),
     'rdo': build_work_item_list([RDO]),
     'ipa': build_work_item_list([IPA]),
     'openidc': build_work_item_list([OpenIDC]),
-
-    'network': build_work_item_list([PrivateNetworkList, PublicNetworkList])
+    'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
+    'inventory': build_work_item_list([Inventory])
 }
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Display the state of the system.')
+    parser = argparse.ArgumentParser(
+        description='Display the state of the system.')
     parser.add_argument('worker', nargs='?', default='all',
                         help='Worker to execute, defaults to "all"')
     args = parser.parse_args()
     return args
-
 
 
 def enable_logging():
@@ -606,6 +664,7 @@ def teardown(worker='all'):
 def display(worker='all'):
     workers[worker].display()
 
+
 def list():
     logging.info(json.dumps(workers.keys()))
 
@@ -615,7 +674,7 @@ def main():
     args_data = file(args_file).read()
     arguments = shlex.split(args_data)
     worker = 'all'
-    action= WorkItemList.display
+    action = WorkItemList.display
 
     for arg in arguments:
         # ignore any arguments without an equals in it
@@ -631,13 +690,11 @@ def main():
                 elif value == 'display':
                     action = WorkItemList.display
 
-
     logging.basicConfig(level=logging.ERROR)
-    changed = False
 
     action(worker)
     print json.dumps({
-        'success' : True,
+        'success': True,
         'args': args_data
     })
 
