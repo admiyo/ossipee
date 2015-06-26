@@ -1,4 +1,8 @@
 ---
 - hosts: ipa
+  remote_user: centos
+  sudo: yes
+  name: install-ipa
   tasks:
+  - yum: name=* state=latest
   - command: ipa-server-install -U -r AYOUNG -p FreeIPA4All -a FreeIPA4All --setup-dns --forwarder 192.168.52.3

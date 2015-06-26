@@ -1,0 +1,24 @@
+---
+- hosts: rdo
+  remote_user: centos
+  sudo: yes
+  name: install-rdo
+  tasks:
+  - hostname: name=rdo.ayoung
+  - yum: name=cloud-init state=absent
+  - yum: name=* state=latest
+  - yum: name=ipa-client,epel-release state=latest
+  - command:  yum install -y https://repos.fedorapeople.org/repos/openstack/openstack-kilo/rdo-release-kilo-1.noarch.rpm
+  - command: setenforce permissive
+  - yum: name=openstack-packstack state=latest
+  - command: ssh-keygen -t rsa -f /root/.ssh/id_rsa -N ""
+  # Ansible does not allow append or redirect, so just copy the file over.
+  - command: cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys
+  - command: /usr/bin/packstack --gen-answer-file=/root/answerfile.txt
+  - command: sed -i 's/CONFIG_NEUTRON_INSTALL=y/CONFIG_NEUTRON_INSTALL=n/g' /root/answerfile.txt
+  - command: sed -i "s/CONFIG_\(.*\)_PW=.*/CONFIG_\1_PW=FreeIPA4All/g" /root/answerfile.txt
+  - command: sed -i 's/CONFIG_KEYSTONE_SERVICE_NAME=keystone/CONFIG_KEYSTONE_SERVICE_NAME=httpd/g' /root/answerfile.txt
+  - command: /usr/bin/packstack --debug --answer-file=/root/answerfile.txt
+
+  - command: sed -i "s/^nameserver .*/nameserver 192.168.52.2/g" /etc/resolv.conf  
+  - command: ipa-client-install -U -p admin@AYOUNG -w FreeIPA4All --force
