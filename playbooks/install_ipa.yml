@@ -5,4 +5,6 @@
   name: install-ipa
   tasks:
   - yum: name=* state=latest
+  - yum: name=rng-tools,bind-dyndb-ldap,ipa-server state=latest
+#  - command: /usr/sbin/rngd -r /dev/hwrng
   - command: ipa-server-install -U -r AYOUNG -p FreeIPA4All -a FreeIPA4All --setup-dns --forwarder 192.168.52.3
