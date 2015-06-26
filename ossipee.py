@@ -13,8 +13,6 @@ import time
 import yaml
 
 
-
-
 from ansible.module_utils import basic
 
 
@@ -86,6 +84,8 @@ packages:
 
 class Plan(object):
     name = os.environ.get('USER', 'rdo')
+#    name = "oidc"
+    username =   os.environ.get('USER', 'rdo')
     domain_name = name
 
     networks = {
@@ -102,7 +102,7 @@ class Plan(object):
     }
     flavor = 'm1.medium'
     image = 'centos-7-cloud'
-    key = name + '-pubkey'
+    key = username + '-pubkey'
     security_groups = ['default']
     forwarder = '192.168.52.3'
 
@@ -353,15 +353,15 @@ class FloatIP(WorkItem):
         self.remove_float_from_server(server)
 
 
-class IPAFloatIP(FloatIP):
-    host_name = 'ipa'
-
-class RDOFloatIP(FloatIP):
-    host_name = 'rdo'
 
 
 
 class NovaHost(WorkItem):
+
+    #Override this if the host needs more complex userdata
+    def user_data_template(self):
+        return user_data_template 
+
     def _host(self, name, user_data):
 
         nics = []
@@ -443,44 +443,7 @@ class IPAAddress(WorkItem):
     def display(self):
         self.display_static_address()
 
-
-class IPAServer(NovaHost):
-
-    def user_data_template(self):
-        return user_data_template + '''
-packages:
- - ipa-client
- - ipa-server
- - bind-dyndb-ldap
-runcmd:
-'''
-
-
-    def host_name(self):
-        return 'ipa'
-
-old_ipa_install_command = '''
- - [ ipa-server-install, -r, %(realm)s, -n, %(hostname)s, -p,
-     FreeIPA4All, -a, FreeIPA4All, -N, --hostname=%(fqdn)s,
-     --setup-dns, --forwarder=192.168.52.3, -U]
-'''
-
-
-
-class RDOServer(NovaHost):
-
-    def user_data_template(self):
-        return rdo_data
-
-
-    def create(self):
-        super(RDOServer,self).create()
-
-
-    def host_name(self):
-        return 'rdo'
-
-
+    
 class WorkItemList(object):
 
     def __init__(self, work_item_classes, session, plan):
@@ -508,6 +471,33 @@ class WorkItemList(object):
             logging.info(item.__class__.__name__)
             item.display()
 
+
+class IPAFloatIP(FloatIP):
+    host_name = 'ipa'
+
+class RDOFloatIP(FloatIP):
+    host_name = 'rdo'
+
+class OpenIDCFloatIP(FloatIP):
+    host_name = 'openidc'
+
+class IPAServer(NovaHost):
+    def host_name(self):
+        return 'ipa'
+
+class RDOServer(NovaHost):
+
+    def user_data_template(self):
+        return rdo_data
+
+    def host_name(self):
+        return 'rdo'
+
+class OpenIDCServer(NovaHost):
+
+    def host_name(self):
+        return 'openidc'
+            
 class IPA(WorkItemList):
     def __init__(self, session, plan):
         super(IPA, self).__init__([IPAServer, IPAFloatIP], session, plan)
@@ -517,6 +507,12 @@ class RDO(WorkItemList):
     def __init__(self, session, plan):
         super(RDO, self).__init__([RDOServer, RDOFloatIP], session, plan)
 
+class OpenIDC(WorkItemList):
+    def __init__(self, session, plan):
+        super(OpenIDC, self).__init__([OpenIDCServer, OpenIDCFloatIP],
+                                      session, plan)
+
+        
 class PublicNetworkList(WorkItemList):
     def __init__(self, session, plan):
         super(PublicNetworkList, self).__init__(
@@ -576,10 +572,12 @@ worker = build_work_item_list([
 
 workers = {
     'all': build_work_item_list([
-        PublicNetworkList,
+        PrivateNetworkList, PublicNetworkList,
         IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP]),
     'rdo': build_work_item_list([RDO]),
     'ipa': build_work_item_list([IPA]),
+    'openidc': build_work_item_list([OpenIDC]),
+
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList])
 }
 
@@ -611,10 +609,6 @@ def display(worker='all'):
 def list():
     logging.info(json.dumps(workers.keys()))
 
-import sys
-import json
-import os
-import shlex
 
 def main():
     args_file = sys.argv[1]
