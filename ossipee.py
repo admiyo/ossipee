@@ -96,11 +96,15 @@ class Plan(object):
                 config = ConfigParser.RawConfigParser()
                 config.add_section('scope')
                 config.set('scope', 'name', 'deleteme')
+                config.set('scope', 'pubkey', self.key)
+
                 config.write(f)
 
             
         config.read(self.config_file)
         self.name = config.get("scope","name")
+        self.key = config.get("scope","pubkey")
+
         name = self.name
 
         self.inventory_dir = self.config_dir + "/inventory/"
@@ -125,11 +129,6 @@ class Plan(object):
         self.key = self.username + '-pubkey'
         self.security_groups = ['default']
         self.forwarder = '192.168.52.3'
-
-
-
-
-        
     
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
