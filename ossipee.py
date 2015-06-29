@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 
+import ConfigParser
 
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
@@ -74,33 +75,62 @@ packages:
 '''
 
 
+
+
 class Plan(object):
-    name = os.environ.get('USER', 'rdo')
-#    name = "oidc"
-    config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
-    inventory_dir = config_dir + "/inventory/"
-    inventory_file = inventory_dir + name + ".ini"
-    username = os.environ.get('USER', 'rdo')
-    domain_name = name
 
-    networks = {
-        'public': {
-            'router_name': name + '-public-router',
-            'network_name': name + '-public-net',
-            'subnet_name': name + '-public-subnet',
-            'cidr': '192.168.52.0/24'},
-        'private': {
-            'router_name': name + '-private-router',
-            'network_name': name + '-private-net',
-            'subnet_name': name + '-private-subnet',
-            'cidr': '192.168.178.0/24'},
-    }
-    flavor = 'm1.medium'
-    image = 'centos-7-cloud'
-    key = username + '-pubkey'
-    security_groups = ['default']
-    forwarder = '192.168.52.3'
+    
+    def __init__(self):
+        config = ConfigParser.ConfigParser()
 
+        self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
+
+        
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+
+        self.config_file = self.config_dir + "/config.ini" 
+            
+        if not os.path.exists(self.config_file):
+            with open(self.config_file, 'w') as f:
+                config = ConfigParser.RawConfigParser()
+                config.add_section('scope')
+                config.set('scope', 'name', 'deleteme')
+                config.write(f)
+
+            
+        config.read(self.config_file)
+        self.name = config.get("scope","name")
+        name = self.name
+
+        self.inventory_dir = self.config_dir + "/inventory/"
+        self.inventory_file = self.inventory_dir + name + ".ini"
+        self.username = os.environ.get('USER', 'rdo')
+        self.domain_name = name
+
+        self.networks = {
+            'public': {
+                'router_name': name + '-public-router',
+                'network_name': name + '-public-net',
+                'subnet_name': name + '-public-subnet',
+                'cidr': '192.168.52.0/24'},
+            'private': {
+                'router_name': name + '-private-router',
+                'network_name': name + '-private-net',
+                'subnet_name': name + '-private-subnet',
+                'cidr': '192.168.178.0/24'},
+        }
+        self.flavor = 'm1.medium'
+        self.image = 'centos-7-cloud'
+        self.key = self.username + '-pubkey'
+        self.security_groups = ['default']
+        self.forwarder = '192.168.52.3'
+
+
+
+
+        
+    
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
@@ -382,7 +412,7 @@ class NovaHost(WorkItem):
             meta=None,
             files=None,
             reservation_id=None,
-            min_count=1,
+            min_cont=1,
             max_count=1,
             userdata=user_data,
             key_name=self.plan.key,
@@ -583,32 +613,36 @@ class PrivateNetworkList(WorkItemList):
         super(PrivateNetworkList, self).__init__(
             [PrivateNetwork, PrivateSubNet], session, plan)
 
-
+components = dict()
 _auth = None
 _session = None
 
 
-def get_auth():
-    if _auth is None:
-        OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
-        OS_USERNAME = os.environ.get('OS_USERNAME')
-        OS_PASSWORD = os.environ.get('OS_PASSWORD')
-        OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
-        OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
-        OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
-
-        if OS_AUTH_URL is None:
-            logging.error('OS_AUTH_URL not set.  Aborting.')
-            sys.exit(-1)
-
-        auth = v3.Password(auth_url=OS_AUTH_URL,
-                           username=OS_USERNAME,
-                           user_domain_name=OS_USER_DOMAIN_NAME,
-                           password=OS_PASSWORD,
-                           project_name=OS_PROJECT_NAME,
-                           project_domain_name=OS_PROJECT_DOMAIN_NAME)
-
+def _create_auth():
+    OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
+    OS_USERNAME = os.environ.get('OS_USERNAME')
+    OS_PASSWORD = os.environ.get('OS_PASSWORD')
+    OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
+    OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
+    OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
+    
+    if OS_AUTH_URL is None:
+        logging.error('OS_AUTH_URL not set.  Aborting.')
+        sys.exit(-1)
+        
+    auth = v3.Password(auth_url=OS_AUTH_URL,
+                       username=OS_USERNAME,
+                       user_domain_name=OS_USER_DOMAIN_NAME,
+                       password=OS_PASSWORD,
+                       project_name=OS_PROJECT_NAME,
+                       project_domain_name=OS_PROJECT_DOMAIN_NAME)
+    
     return auth
+
+def get_auth():
+    if components.get(v3.Auth) is None:
+        components[v3.Auth] = _create_auth()
+    return components[v3.Auth]
 
 
 def create_session():
