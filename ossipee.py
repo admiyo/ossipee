@@ -19,20 +19,6 @@ from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
 
-resolve_data = '''
-manage-resolv-conf: true
-
-resolv_conf:
-  nameservers: ['192.168.52.2']
-  searchdomains:
-    - foo.example.com
-    - bar.example.com
-  domain:
-  options:
-    rotate: true
-    timeout: 1
-
-'''
 
 user_data_template = '''
 #cloud-config
