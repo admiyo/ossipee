@@ -61,57 +61,50 @@ packages:
 '''
 
 
-
-
 class Plan(object):
-
-    
     def __init__(self):
-        config = ConfigParser.ConfigParser()
-
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
         self.key = self.username + '-pubkey'
-
-        
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
 
-        self.config_file = self.config_dir + "/config.ini" 
-            
+        self.config_file = self.config_dir + "/config.ini"
+
         if not os.path.exists(self.config_file):
             with open(self.config_file, 'w') as f:
                 config = ConfigParser.RawConfigParser()
                 config.add_section('scope')
-                config.set('scope', 'name', 'deleteme')
+                config.set('scope', 'name', self.username)
                 config.set('scope', 'pubkey', self.key)
-
                 config.write(f)
+                logging.error("No config file %s. wrote default" %
+                              self.config_file)
+                exit(1)
 
-            
+        config = ConfigParser.ConfigParser()
         config.read(self.config_file)
         try:
-            self.name = config.get("scope","name")
-            self.key = config.get("scope","pubkey")
+            self.name = config.get("scope", "name")
+            self.key = config.get("scope", "pubkey")
         except ConfigParser.NoSectionError:
             with open(self.config_file, 'w') as f:
-                config = ConfigParser.RawConfigParser()
                 config.add_section('scope')
-                config.set('scope', 'name', 'deleteme')
+                config.set('scope', 'name', self.username)
                 config.set('scope', 'pubkey', self.key)
                 config.write(f)
-                self.name = config.get("scope","name")
-                self.key = config.get("scope","pubkey")
+                self.name = config.get("scope", "name")
+                self.key = config.get("scope", "pubkey")
+                logging.error("No Scope Section in %s, wrote defaults" %
+                              self.config_file)
+                exit(1)
 
-
-            
         name = self.name
         self.domain_name = name
         self.inventory_dir = self.config_dir + "/inventory/"
         self.inventory_file = self.inventory_dir + name + ".ini"
         self.variable_dir = self.config_dir + "/variables/"
         self.variable_file = self.variable_dir + name + ".ini"
-
 
         self.networks = {
             'public': {
@@ -129,19 +122,17 @@ class Plan(object):
         self.image = 'centos-7-cloud'
         self.security_groups = ['default']
         self.forwarder = '192.168.52.3'
-
-
-        self.hosts =     {
-            "ipa":{
-                "ipa_forwarder" :"192.168.52.3",
-                "ipa_realm" : name.upper(),
-                "ipa_server_password":"FreeIPA4All",
+        self.hosts = {
+            "ipa": {
+                "ipa_forwarder": "192.168.52.3",
+                "ipa_realm": name.upper(),
+                "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             },
-            "rdo":{},
-            "openidc":{}
-         }
-        
+            "rdo": {},
+            "openidc": {}
+        }
+
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
@@ -380,7 +371,7 @@ class FloatIP(WorkItem):
                 logging.info(
                     'ssh to server failed.' +
                     '  Waiting 5 seconds to retry %s.' % ip_address +
-                    '  Attempts left = %d' , attempts)
+                    '  Attempts left = %d', attempts)
                 attempts = attempts - 1
                 time.sleep(5)
 
@@ -492,9 +483,8 @@ class IPAAddress(WorkItem):
         self.display_static_address()
 
 
-
 class FileWorkItem(WorkItem):
-    
+
     def create(self):
         if not os.path.exists(self.directory):
             os.makedirs(self.directory)
@@ -530,10 +520,11 @@ class FileWorkItem(WorkItem):
         if os.path.exists(self.file_name):
             os.remove(self.file_name)
 
+
 class Inventory(FileWorkItem):
 
     def __init__(self, session, plan):
-        super(Inventory,self).__init__(session, plan)
+        super(Inventory, self).__init__(session, plan)
         self.directory = self.plan.inventory_dir
         self.file_name = self.plan.inventory_file
 
@@ -553,7 +544,6 @@ class Inventory(FileWorkItem):
             except IndexError:
                 pass
 
-            
 
 class WorkItemList(object):
 
@@ -655,19 +645,20 @@ def _create_auth():
     OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
     OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
     OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
-    
+
     if OS_AUTH_URL is None:
         logging.error('OS_AUTH_URL not set.  Aborting.')
         sys.exit(-1)
-        
+
     auth = v3.Password(auth_url=OS_AUTH_URL,
                        username=OS_USERNAME,
                        user_domain_name=OS_USER_DOMAIN_NAME,
                        password=OS_PASSWORD,
                        project_name=OS_PROJECT_NAME,
                        project_domain_name=OS_PROJECT_DOMAIN_NAME)
-    
+
     return auth
+
 
 def get_auth():
     if components.get(v3.Auth) is None:
