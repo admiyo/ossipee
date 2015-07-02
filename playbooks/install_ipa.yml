@@ -8,7 +8,7 @@
   - yum: name=rng-tools,bind-dyndb-ldap,ipa-server,epel-release state=latest
 #  - command: /usr/sbin/rngd -r /dev/hwrng
 
-  - command: ipa-server-install -U -r AYOUNG -p FreeIPA4All -a FreeIPA4All --setup-dns --forwarder 192.168.52.3
+  - command: ipa-server-install -U -r {{ ipa_realm }} -p {{ ipa_server_password }} -a {{ ipa_admin_user_password }} --setup-dns --forwarder {{ ipa_forwarder }}
   - get_url: dest=/etc/yum.repos.d/puiterwijk-ipsilon.repo url=https://copr.fedoraproject.org/coprs/puiterwijk/ipsilon/repo/epel-7/puiterwijk-ipsilon-epel-7.repo
   - get_url: dest=/etc/yum.repos.d/sssd.repo url=https://copr.fedoraproject.org/coprs/nkinder/sssd/repo/epel-7/nkinder-sssd-epel-7.repo
   - yum: name=ipsilon,ipsilon-tools-ipa,ipsilon-saml2,ipsilon-authgssapi,ipsilon-authform,ipsilon-infosssd state=latest

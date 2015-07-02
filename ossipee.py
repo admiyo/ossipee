@@ -95,6 +95,9 @@ class Plan(object):
 
         self.inventory_dir = self.config_dir + "/inventory/"
         self.inventory_file = self.inventory_dir + name + ".ini"
+        self.variable_dir = self.config_dir + "/variables/"
+        self.variable_file = self.variable_dir + name + ".ini"
+
         self.username = os.environ.get('USER', 'rdo')
         self.domain_name = name
 
@@ -115,7 +118,19 @@ class Plan(object):
         self.key = self.username + '-pubkey'
         self.security_groups = ['default']
         self.forwarder = '192.168.52.3'
-    
+
+
+        self.hosts =     {
+            "ipa":{
+                "ipa_forwarder" :"192.168.52.3",
+                "ipa_realm" : name.upper(),
+                "ipa_server_password":"FreeIPA4All",
+                "ipa_admin_user_password": "FreeIPA4All"
+            },
+            "rdo":{},
+            "openidc":{}
+         }
+        
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
@@ -466,49 +481,68 @@ class IPAAddress(WorkItem):
         self.display_static_address()
 
 
-class Inventory(WorkItem):
+
+class FileWorkItem(WorkItem):
+    
     def create(self):
-        if not os.path.exists(self.plan.inventory_dir):
-            os.makedirs(self.plan.inventory_dir)
-        with open(self.plan.inventory_file, 'w') as f:
-            for host in ["ipa", "rdo", "openidc"]:
-                f.write("[%s]\n" % host)
-                try:
-                    server = self.get_server_by_name(self.make_fqdn(host))
-                    ip = self.floating_ip_for_server(server)
-                    f.write("%s\n" % ip)
-                except IndexError:
-                    pass
+        if not os.path.exists(self.directory):
+            os.makedirs(self.directory)
+        with open(self.file_name, 'w') as f:
+            self.write_contents(f)
 
     def display(self):
         try:
-            with open(self.plan.inventory_file, 'r')as f:
+            with open(self.file_name, 'r')as f:
                 read_data = f.read()
                 print(read_data)
 
         except IOError as ioerror:
-            if not os.path.exists(self.plan.inventory_dir):
+            if not os.path.exists(self.directory):
                 print("Inventory Directory %s does not exist" %
-                      self.plan.inventory_dir)
+                      self.directory)
                 return
 
-            if not os.path.isdir(self.plan.inventory_dir):
+            if not os.path.isdir(self.directory):
                 print("%s exists but is not a directory" %
-                      self.plan.inventory_dir)
+                      self.directory)
                 return
 
-            if not os.path.exists(self.plan.inventory_file):
+            if not os.path.exists(self.file_name):
                 print("Inventory File %s does not exist" %
-                      self.plan.inventory_file)
+                      self.file_name)
                 return
 
             print("Error reading inventory file")
             print(ioerror)
 
     def teardown(self):
-        if os.path.exists(self.plan.inventory_file):
-            os.remove(self.plan.inventory_file)
+        if os.path.exists(self.file_name):
+            os.remove(self.file_name)
 
+class Inventory(FileWorkItem):
+
+    def __init__(self, session, plan):
+        super(Inventory,self).__init__(session, plan)
+        self.directory = self.plan.inventory_dir
+        self.file_name = self.plan.inventory_file
+
+    def write_contents(self, f):
+
+        for host, vars in self.plan.hosts.iteritems():
+            try:
+                server = self.get_server_by_name(self.make_fqdn(host))
+                ip = self.floating_ip_for_server(server)
+                f.write("[%s]\n" % host)
+                f.write("%s\n\n" % ip)
+                f.write("[%s:vars]\n" % host)
+                for key, value in vars.iteritems():
+                    f.write("%s=%s\n" % (key, value))
+                f.write("\n")
+
+            except IndexError:
+                pass
+
+            
 
 class WorkItemList(object):
 
