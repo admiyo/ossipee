@@ -1,0 +1,3 @@
+python-neutronclient
+python-novaclient
+python-keystoneclient
