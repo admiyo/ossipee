@@ -70,6 +70,8 @@ class Plan(object):
         config = ConfigParser.ConfigParser()
 
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
+        self.username = os.environ.get('USER', 'rdo')
+        self.key = self.username + '-pubkey'
 
         
         if not os.path.exists(self.config_dir):
@@ -88,18 +90,28 @@ class Plan(object):
 
             
         config.read(self.config_file)
-        self.name = config.get("scope","name")
-        self.key = config.get("scope","pubkey")
+        try:
+            self.name = config.get("scope","name")
+            self.key = config.get("scope","pubkey")
+        except ConfigParser.NoSectionError:
+            with open(self.config_file, 'w') as f:
+                config = ConfigParser.RawConfigParser()
+                config.add_section('scope')
+                config.set('scope', 'name', 'deleteme')
+                config.set('scope', 'pubkey', self.key)
+                config.write(f)
+                self.name = config.get("scope","name")
+                self.key = config.get("scope","pubkey")
 
+
+            
         name = self.name
-
+        self.domain_name = name
         self.inventory_dir = self.config_dir + "/inventory/"
         self.inventory_file = self.inventory_dir + name + ".ini"
         self.variable_dir = self.config_dir + "/variables/"
         self.variable_file = self.variable_dir + name + ".ini"
 
-        self.username = os.environ.get('USER', 'rdo')
-        self.domain_name = name
 
         self.networks = {
             'public': {
@@ -115,7 +127,6 @@ class Plan(object):
         }
         self.flavor = 'm1.medium'
         self.image = 'centos-7-cloud'
-        self.key = self.username + '-pubkey'
         self.security_groups = ['default']
         self.forwarder = '192.168.52.3'
 
