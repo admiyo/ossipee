@@ -62,6 +62,15 @@ packages:
 
 
 class Plan(object):
+    def _default_config_options(self, config, outfile):
+        config.add_section('scope')
+        config.set('scope', 'name', self.username)
+        config.set('scope', 'pubkey', self.key)
+        config.set('scope', 'flavor',  'm1.medium')
+        config.set('scope', 'image',  'centos-7-cloud')
+        config.set('scope', 'forwarder',  '192.168.52.3')
+        config.write(outfile)
+
     def __init__(self):
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
@@ -74,10 +83,7 @@ class Plan(object):
         if not os.path.exists(self.config_file):
             with open(self.config_file, 'w') as f:
                 config = ConfigParser.RawConfigParser()
-                config.add_section('scope')
-                config.set('scope', 'name', self.username)
-                config.set('scope', 'pubkey', self.key)
-                config.write(f)
+                self._default_config_options(config, f)
                 logging.error("No config file %s. wrote default" %
                               self.config_file)
                 exit(1)
@@ -87,17 +93,16 @@ class Plan(object):
         try:
             self.name = config.get("scope", "name")
             self.key = config.get("scope", "pubkey")
+            self.flavor = config.get("scope", 'flavor')
+            self.image = config.get("scope", 'image')
+            self.forwarder = config.get("scope", 'forwarder')
+            self.security_groups = ['default']
+
         except ConfigParser.NoSectionError:
-            with open(self.config_file, 'w') as f:
-                config.add_section('scope')
-                config.set('scope', 'name', self.username)
-                config.set('scope', 'pubkey', self.key)
-                config.write(f)
-                self.name = config.get("scope", "name")
-                self.key = config.get("scope", "pubkey")
-                logging.error("No Scope Section in %s, wrote defaults" %
-                              self.config_file)
-                exit(1)
+            self._default_config_options(config, f)
+            logging.error("No Scope Section in %s, wrote defaults" %
+                          self.config_file)
+            exit(1)
 
         name = self.name
         self.domain_name = name
@@ -118,10 +123,6 @@ class Plan(object):
                 'subnet_name': name + '-private-subnet',
                 'cidr': '192.168.178.0/24'},
         }
-        self.flavor = 'm1.medium'
-        self.image = 'centos-7-cloud'
-        self.security_groups = ['default']
-        self.forwarder = '192.168.52.3'
         self.hosts = {
             "ipa": {
                 "ipa_forwarder": "192.168.52.3",
@@ -129,7 +130,11 @@ class Plan(object):
                 "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             },
-            "rdo": {},
+            "rdo": {
+                "ipa_realm": name.upper(),
+                "rdo_password": "FreeIPA4All",
+                "ipa_admin_user_password": "FreeIPA4All"
+            },
             "openidc": {}
         }
 
@@ -327,6 +332,11 @@ class RouterInterface(WorkItem):
 
 
 class FloatIP(WorkItem):
+
+    def __init__(self, session, plan, host_name):
+        super(FloatIP, self).__init__(session, plan)
+        self.host_name = host_name
+
     def next_float_ip(self):
         ip_list = self.nova.floating_ips.list()
         for float in ip_list:
@@ -393,6 +403,9 @@ class FloatIP(WorkItem):
 
 
 class NovaHost(WorkItem):
+    def __init__(self, session, plan, name):
+        super(NovaHost, self).__init__(session, plan)
+        self.host_name = name
 
     # Override this if the host needs more complex userdata
     def user_data_template(self):
@@ -444,7 +457,7 @@ class NovaHost(WorkItem):
     def user_data(self):
         realm = self.plan.domain_name.upper()
         data = self.user_data_template() % {
-            'hostname': self.host_name(),
+            'hostname': self.host_name,
             'fqdn': self.fqdn(),
             'realm': realm,
             'domain': self.plan.domain_name
@@ -452,14 +465,14 @@ class NovaHost(WorkItem):
         return data
 
     def fqdn(self):
-        return self.host_name() + '.' + self.plan.domain_name
+        return self.host_name + '.' + self.plan.domain_name
 
     def host_list(self):
         for host in self.nova.servers.list(search_opts={'name': self.fqdn()}):
             yield host
 
     def create(self):
-        host = self._host(self.host_name(), self.user_data())
+        host = self._host(self.host_name, self.user_data())
         logging.info(host)
 
     def display(self):
@@ -574,35 +587,36 @@ class WorkItemList(object):
 
 
 class IPAFloatIP(FloatIP):
-    host_name = 'ipa'
+    def __init__(self, session, plan):
+        super(IPAFloatIP, self).__init__(session, plan, 'ipa')
 
 
 class RDOFloatIP(FloatIP):
-    host_name = 'rdo'
+    def __init__(self, session, plan):
+        super(RDOFloatIP, self).__init__(session, plan, 'rdo')
 
 
 class OpenIDCFloatIP(FloatIP):
-    host_name = 'openidc'
+    def __init__(self, session, plan):
+        super(OpenIDCFloatIP, self).__init__(session, plan, 'openidc')
 
 
 class IPAServer(NovaHost):
-    def host_name(self):
-        return 'ipa'
+    def __init__(self, session, plan):
+        super(IPAServer, self).__init__(session, plan, 'ipa')
 
 
 class RDOServer(NovaHost):
+    def __init__(self, session, plan):
+        super(RDOServer, self).__init__(session, plan, 'rdo')
 
     def user_data_template(self):
         return rdo_data
 
-    def host_name(self):
-        return 'rdo'
-
 
 class OpenIDCServer(NovaHost):
-
-    def host_name(self):
-        return 'openidc'
+    def __init__(self, session, plan):
+        super(OpenIDCServer, self).__init__(session, plan, 'openidc')
 
 
 class IPA(WorkItemList):
