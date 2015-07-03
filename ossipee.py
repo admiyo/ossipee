@@ -28,38 +28,6 @@ package_upgrade: true
 
 '''
 
-rdo_data = user_data_template + '''
-
-
-yum_repos:
-    # The name of the repository
-    epel-kilo:
-        # This one is required!
-        baseurl: http://download.fedoraproject.org/pub/epel/7/$basearch
-        enabled: True
-        failovermethod: priority
-        gpgcheck: False
-        gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL
-        name: Extra Packages for Enterprise Linux 7 - Testing
-
-
-    openstack-kilo:
-        name: OpenStack Kilo Repository
-""" +
-"        baseurl: http://repos.fedorapeople.org/repos/openstack/"+
-"openstack-kilo/el7/"+
-"""
-        skip_if_unavailable: 0
-        enabled: 1
-        gpgcheck: 0
-        gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-RDO-kilo
-
-packages:
- - ipa-client
- - epel-release
- - openstack-packstack
-'''
-
 
 class Plan(object):
     def _default_config_options(self, config, outfile):
@@ -134,8 +102,7 @@ class Plan(object):
                 "ipa_realm": name.upper(),
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
-            },
-            "openidc": {}
+            }
         }
 
     def make_fqdn(self, name):
@@ -209,8 +176,8 @@ class WorkItem(object):
             if float.instance_id == server.id:
                 return (float.ip)
 
-    def __init__(self, session, plan):
-
+    def __init__(self, session, plan, name):
+        self.name = name
         self.keystone = keystone_v3.Client(session=session)
         self.nova = novaclient.Client('2', session=session)
         self.neutron = neutronclient.Client('2.0', session=session)
@@ -226,12 +193,12 @@ class Network(WorkItem):
 
     def _networks_response(self):
         return self.neutron.list_networks(
-            name=self.plan.networks[self.which]['network_name'])
+            name=self.plan.networks[self.name]['network_name'])
 
     def create(self):
         network = self.neutron.create_network(
             {'network':
-             {'name': self.plan.networks[self.which]['network_name'],
+             {'name': self.plan.networks[self.name]['network_name'],
               'admin_state_up': True}})
         logging.info(network)
 
@@ -243,24 +210,15 @@ class Network(WorkItem):
             self.neutron.delete_network(network['id'])
 
 
-class PublicNetwork(Network):
-    which = 'public'
-
-
-class PrivateNetwork(Network):
-    which = 'private'
-
-
 class SubNet(WorkItem):
-
     def create(self):
-        network = self._networks_response(self.which)['networks'][0]
+        network = self._networks_response(self.name)['networks'][0]
         subnet = self.neutron.create_subnet(
             body={
                 'subnets': [
                     {
-                        'name': self.plan.networks[self.which]['subnet_name'],
-                        'cidr': self.plan.networks[self.which]['cidr'],
+                        'name': self.plan.networks[self.name]['subnet_name'],
+                        'cidr': self.plan.networks[self.name]['cidr'],
                         'ip_version': 4,
                         'network_id': network['id']
                     }
@@ -269,28 +227,19 @@ class SubNet(WorkItem):
         logging.info(subnet)
 
     def display(self):
-        logging.info(self._subnet_response(self.which))
+        logging.info(self._subnet_response(self.name))
 
     def teardown(self):
-        for subnet in self._subnet_response(self.which)['subnets']:
+        for subnet in self._subnet_response(self.name)['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
 
-class PublicSubNet(SubNet):
-    which = 'public'
-
-
-class PrivateSubNet(SubNet):
-    which = 'private'
-
-
 class Router(WorkItem):
-    which = "public"
 
     def create(self):
         router = self.neutron.create_router(
             body={'router': {
-                'name': self.plan.networks[self.which]['router_name'],
+                'name': self.plan.networks[self.name]['router_name'],
                 'admin_state_up': True,
             }})['router']
         self.neutron.add_gateway_router(
@@ -298,32 +247,30 @@ class Router(WorkItem):
             {'network_id': self._external_id()})
 
     def display(self):
-        logging.info(self._router_response(self.which))
+        logging.info(self._router_response(self.name))
 
     def teardown(self):
-        for router in self._router_response(self.which)['routers']:
+        for router in self._router_response(self.name)['routers']:
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
 
 
 class RouterInterface(WorkItem):
-    which = "public"
-
     def create(self):
         self.neutron.add_interface_router(
-            self._router_response(self.which)['routers'][0]['id'],
-            {'subnet_id': self._subnet_id(self.which)})
+            self._router_response(self.name)['routers'][0]['id'],
+            {'subnet_id': self._subnet_id(self.name)})
 
     def display(self):
-        for router in self._router_response(self.which)['routers']:
+        for router in self._router_response(self.name)['routers']:
             try:
-                print (self._subnet_response(self.which)['subnets'])
+                print (self._subnet_response(self.name)['subnets'])
             except Exception:
                 pass
 
     def teardown(self):
-        for router in self._router_response(self.which)['routers']:
-            for subnet in self._subnet_response(self.which)['subnets']:
+        for router in self._router_response(self.name)['routers']:
+            for subnet in self._subnet_response(self.name)['subnets']:
                 try:
                     self.neutron.remove_interface_router(
                         router['id'], {'subnet_id': subnet['id']})
@@ -332,10 +279,6 @@ class RouterInterface(WorkItem):
 
 
 class FloatIP(WorkItem):
-
-    def __init__(self, session, plan, host_name):
-        super(FloatIP, self).__init__(session, plan)
-        self.host_name = host_name
 
     def next_float_ip(self):
         ip_list = self.nova.floating_ips.list()
@@ -386,26 +329,23 @@ class FloatIP(WorkItem):
                 time.sleep(5)
 
     def create(self):
-        server = self.get_server_by_name(self.make_fqdn(self.host_name))
+        server = self.get_server_by_name(self.make_fqdn(self.name))
         ip_address = self.assign_next_ip(server)
         self.reset_ssh(ip_address)
 
     def display(self):
         try:
-            server = self.get_server_by_name(self.make_fqdn(self.host_name))
+            server = self.get_server_by_name(self.make_fqdn(self.name))
             self.display_ip_for_server(server)
         except IndexError:
             pass
 
     def teardown(self):
-        server = self.get_server_by_name(self.make_fqdn(self.host_name))
+        server = self.get_server_by_name(self.make_fqdn(self.name))
         self.remove_float_from_server(server)
 
 
-class NovaHost(WorkItem):
-    def __init__(self, session, plan, name):
-        super(NovaHost, self).__init__(session, plan)
-        self.host_name = name
+class NovaServer(WorkItem):
 
     # Override this if the host needs more complex userdata
     def user_data_template(self):
@@ -414,8 +354,8 @@ class NovaHost(WorkItem):
     def _host(self, name, user_data):
 
         nics = []
-        for which in ["public", "private"]:
-            for network in self._networks_response(which)['networks']:
+        for net_name in ["public", "private"]:
+            for network in self._networks_response(net_name)['networks']:
                 nics.append({'net-id': network['id']})
 
         response = self.nova.servers.create(
@@ -457,7 +397,7 @@ class NovaHost(WorkItem):
     def user_data(self):
         realm = self.plan.domain_name.upper()
         data = self.user_data_template() % {
-            'hostname': self.host_name,
+            'hostname': self.name,
             'fqdn': self.fqdn(),
             'realm': realm,
             'domain': self.plan.domain_name
@@ -465,14 +405,14 @@ class NovaHost(WorkItem):
         return data
 
     def fqdn(self):
-        return self.host_name + '.' + self.plan.domain_name
+        return self.name + '.' + self.plan.domain_name
 
     def host_list(self):
         for host in self.nova.servers.list(search_opts={'name': self.fqdn()}):
             yield host
 
     def create(self):
-        host = self._host(self.host_name, self.user_data())
+        host = self._host(self.name, self.user_data())
         logging.info(host)
 
     def display(self):
@@ -537,7 +477,7 @@ class FileWorkItem(WorkItem):
 class Inventory(FileWorkItem):
 
     def __init__(self, session, plan):
-        super(Inventory, self).__init__(session, plan)
+        super(Inventory, self).__init__(session, plan, 'inventory')
         self.directory = self.plan.inventory_dir
         self.file_name = self.plan.inventory_file
 
@@ -560,11 +500,10 @@ class Inventory(FileWorkItem):
 
 class WorkItemList(object):
 
-    def __init__(self, work_item_classes, session, plan):
+    def __init__(self, work_item_factories, session, plan):
 
-        self.work_items = []
-        for item_class in work_item_classes:
-            self.work_items.append(item_class(session, plan))
+        self.work_items = [factory(session, plan)
+                           for factory in work_item_factories]
 
     def create(self):
         for item in self.work_items:
@@ -586,66 +525,63 @@ class WorkItemList(object):
             item.display()
 
 
-class IPAFloatIP(FloatIP):
-    def __init__(self, session, plan):
-        super(IPAFloatIP, self).__init__(session, plan, 'ipa')
+def IPAFloatIP(session, plan):
+    return FloatIP(session, plan, 'ipa')
 
 
-class RDOFloatIP(FloatIP):
-    def __init__(self, session, plan):
-        super(RDOFloatIP, self).__init__(session, plan, 'rdo')
+def RDOFloatIP(session, plan):
+        return FloatIP(session, plan, 'rdo')
 
 
-class OpenIDCFloatIP(FloatIP):
-    def __init__(self, session, plan):
-        super(OpenIDCFloatIP, self).__init__(session, plan, 'openidc')
+def IPAServer(session, plan):
+    return NovaServer(session, plan, 'ipa')
 
 
-class IPAServer(NovaHost):
-    def __init__(self, session, plan):
-        super(IPAServer, self).__init__(session, plan, 'ipa')
+def RDOServer(session, plan):
+    return NovaServer(session, plan, 'rdo')
 
 
-class RDOServer(NovaHost):
-    def __init__(self, session, plan):
-        super(RDOServer, self).__init__(session, plan, 'rdo')
-
-    def user_data_template(self):
-        return rdo_data
+def IPA(session, plan):
+    return WorkItemList([IPAServer, IPAFloatIP], session, plan)
 
 
-class OpenIDCServer(NovaHost):
-    def __init__(self, session, plan):
-        super(OpenIDCServer, self).__init__(session, plan, 'openidc')
+def RDO(session, plan):
+        return WorkItemList([RDOServer, RDOFloatIP], session, plan)
 
 
-class IPA(WorkItemList):
-    def __init__(self, session, plan):
-        super(IPA, self).__init__([IPAServer, IPAFloatIP], session, plan)
+def PublicNetwork(session, plan):
+    return Network(session, plan, 'public')
 
 
-class RDO(WorkItemList):
-    def __init__(self, session, plan):
-        super(RDO, self).__init__([RDOServer, RDOFloatIP], session, plan)
+def PrivateNetwork(session, plan):
+    return Network(session, plan, 'private')
 
 
-class OpenIDC(WorkItemList):
-    def __init__(self, session, plan):
-        super(OpenIDC, self).__init__([OpenIDCServer, OpenIDCFloatIP],
-                                      session, plan)
+def PublicSubNet(session, plan):
+    return SubNet(session, plan, 'public')
 
 
-class PublicNetworkList(WorkItemList):
-    def __init__(self, session, plan):
-        super(PublicNetworkList, self).__init__(
-            [Router, PublicNetwork, PublicSubNet, RouterInterface],
-            session, plan)
+def PrivateSubNet(session, plan):
+    return SubNet(session, plan, 'private')
 
 
-class PrivateNetworkList(WorkItemList):
-    def __init__(self, session, plan):
-        super(PrivateNetworkList, self).__init__(
-            [PrivateNetwork, PrivateSubNet], session, plan)
+def PublicRouter(session, plan):
+    return Router(session, plan, 'public')
+
+
+def PublicRouterInterface(session, plan):
+    return RouterInterface(session, plan, 'public')
+
+
+def PublicNetworkList(session, plan):
+    return WorkItemList(
+        [PublicRouter, PublicNetwork, PublicSubNet, PublicRouterInterface],
+        session, plan)
+
+
+def PrivateNetworkList(session, plan):
+    return WorkItemList(
+        [PrivateNetwork, PrivateSubNet], session, plan)
 
 components = dict()
 _auth = None
@@ -685,10 +621,10 @@ def create_session():
         return session
 
 
-def build_work_item_list(work_item_classes):
+def build_work_item_list(work_item_factories):
     plan = Plan()
     session = create_session()
-    return WorkItemList(work_item_classes, session, plan)
+    return WorkItemList(work_item_factories, session, plan)
 
 worker = build_work_item_list([
     PublicNetwork,
@@ -703,7 +639,6 @@ workers = {
         IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP, Inventory]),
     'rdo': build_work_item_list([RDO]),
     'ipa': build_work_item_list([IPA]),
-    'openidc': build_work_item_list([OpenIDC]),
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
     'inventory': build_work_item_list([Inventory])
 }
