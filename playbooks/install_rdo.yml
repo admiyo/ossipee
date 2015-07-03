@@ -8,6 +8,8 @@
   - yum: name=cloud-init state=absent
   - yum: name=* state=latest
   - yum: name=ipa-client,epel-release state=latest
+  - command: sed -i "s/^nameserver .*/nameserver {{ ipa_forwarder }}/g" /etc/resolv.conf
+  - command: ipa-client-install -U -p admin@{{ ipa_realm }} -w {{ipa_admin_user_password }} --force
   - command:  yum install -y https://repos.fedorapeople.org/repos/openstack/openstack-kilo/rdo-release-kilo-1.noarch.rpm
   - command: setenforce permissive
   - yum: name=openstack-packstack state=latest
@@ -18,7 +20,6 @@
   - command: sed -i 's/CONFIG_NEUTRON_INSTALL=y/CONFIG_NEUTRON_INSTALL=n/g' /root/answerfile.txt
   - command: sed -i "s/CONFIG_\(.*\)_PW=.*/CONFIG_\1_PW={{ rdo_password }} /g" /root/answerfile.txt
   - command: sed -i 's/CONFIG_KEYSTONE_SERVICE_NAME=keystone/CONFIG_KEYSTONE_SERVICE_NAME=httpd/g' /root/answerfile.txt
-  - command: /usr/bin/packstack --debug --answer-file=/root/answerfile.txt
+#  - command: /usr/bin/packstack --debug --answer-file=/root/answerfile.txt
 
-  - command: sed -i "s/^nameserver .*/nameserver {{  }}/g" /etc/resolv.conf
-  - command: ipa-client-install -U -p admin@{{ ipa_realm }} -w {{ipa_admin_user_password }} --force
+ 

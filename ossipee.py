@@ -452,7 +452,7 @@ class FileWorkItem(WorkItem):
 
         except IOError as ioerror:
             if not os.path.exists(self.directory):
-                print("Inventory Directory %s does not exist" %
+                print("Directory %s does not exist" %
                       self.directory)
                 return
 
@@ -462,11 +462,11 @@ class FileWorkItem(WorkItem):
                 return
 
             if not os.path.exists(self.file_name):
-                print("Inventory File %s does not exist" %
+                print("File %s does not exist" %
                       self.file_name)
                 return
 
-            print("Error reading inventory file")
+            print("Error reading file")
             print(ioerror)
 
     def teardown(self):
@@ -483,6 +483,12 @@ class Inventory(FileWorkItem):
 
     def write_contents(self, f):
 
+
+        ipa_server = self.get_server_by_name(self.make_fqdn("ipa"))
+        for nic in ipa_server.addresses[self.plan.name + '-public-net']:
+            if nic['OS-EXT-IPS:type'] == 'fixed':
+                self.plan.hosts['rdo']['ipa_forwarder'] = nic['addr']
+        
         for host, vars in self.plan.hosts.iteritems():
             try:
                 server = self.get_server_by_name(self.make_fqdn(host))
