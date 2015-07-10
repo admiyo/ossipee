@@ -14,7 +14,6 @@ import ConfigParser
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
-
 from keystoneclient import session as ksc_session
 from keystoneclient.auth.identity import v3
 from keystoneclient.v3 import client as keystone_v3
@@ -24,7 +23,6 @@ user_data_template = '''
 #cloud-config
 hostname: %(fqdn)s
 fqdn:  %(fqdn)s
-package_upgrade: true
 
 '''
 
@@ -37,6 +35,7 @@ class Plan(object):
         config.set('scope', 'flavor',  'm1.medium')
         config.set('scope', 'image',  'centos-7-cloud')
         config.set('scope', 'forwarder',  '192.168.52.3')
+        config.set('scope','cloud_user', 'centos')
         config.write(outfile)
 
     def __init__(self):
@@ -65,6 +64,8 @@ class Plan(object):
             self.image = config.get("scope", 'image')
             self.forwarder = config.get("scope", 'forwarder')
             self.security_groups = ['default']
+            self.cloud_user = config.get("scope", "cloud_user")
+
 
         except ConfigParser.NoSectionError:
             self._default_config_options(config, f)
@@ -73,7 +74,7 @@ class Plan(object):
             exit(1)
 
         name = self.name
-        self.domain_name = name
+        self.domain_name = name + ".test"
         self.inventory_dir = self.config_dir + "/inventory/"
         self.inventory_file = self.inventory_dir + name + ".ini"
         self.variable_dir = self.config_dir + "/variables/"
@@ -93,16 +94,25 @@ class Plan(object):
         }
         self.hosts = {
             "ipa": {
+                "cloud_user": self.cloud_user,
                 "ipa_forwarder": "192.168.52.3",
-                "ipa_realm": name.upper(),
+                "ipa_realm": self.domain_name.upper(),
                 "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             },
-            "rdo": {
-                "ipa_realm": name.upper(),
+            "controller": {
+                "cloud_user": self.cloud_user,
+                "ipa_realm": self.domain_name.upper(),
+                "rdo_password": "FreeIPA4All",
+                "ipa_admin_user_password": "FreeIPA4All"
+            },
+            "gitlab": {
+                "cloud_user": self.cloud_user,
+                "ipa_realm": self.domain_name.upper(),
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             }
+
         }
 
     def make_fqdn(self, name):
@@ -318,7 +328,7 @@ class FloatIP(WorkItem):
                     ['ssh',
                      '-o', 'StrictHostKeyChecking=no',
                      '-o', 'PasswordAuthentication=no',
-                     '-l', 'centos', ip_address, 'hostname'])
+                     '-l', self.plan.cloud_user, ip_address, 'hostname'])
                 attempts = 0
             except subprocess.CalledProcessError:
                 logging.info(
@@ -426,6 +436,29 @@ class NovaServer(WorkItem):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
 
+class AllServers(object):
+    def __init__(self, session, plan):
+        
+        self.servers=WorkItemList([], session, plan)
+        self.servers.work_items = [NovaServer(session, plan, server_name)
+                                   for server_name in plan.hosts]
+        self.float_ips=WorkItemList([], session, plan)
+        self.float_ips.work_items =[FloatIP(session, plan,  server_name)
+                                    for server_name in plan.hosts]
+    
+    def create(self):
+        self.servers.create()
+        self.float_ips.create()
+                
+    
+    def display(self):
+        self.servers.display()
+        self.float_ips.display()
+    
+    def teardown(self):
+        self.float_ips.teardown()
+        self.servers.teardown()
+    
 
 class IPAAddress(WorkItem):
     def display_static_address(self):
@@ -487,7 +520,7 @@ class Inventory(FileWorkItem):
         ipa_server = self.get_server_by_name(self.make_fqdn("ipa"))
         for nic in ipa_server.addresses[self.plan.name + '-public-net']:
             if nic['OS-EXT-IPS:type'] == 'fixed':
-                self.plan.hosts['rdo']['ipa_forwarder'] = nic['addr']
+                ipa_forwarder = nic['addr']
         
         for host, vars in self.plan.hosts.iteritems():
             try:
@@ -498,8 +531,9 @@ class Inventory(FileWorkItem):
                 f.write("[%s:vars]\n" % host)
                 for key, value in vars.iteritems():
                     f.write("%s=%s\n" % (key, value))
+                f.write("%s=%s\n" % ('ipa_forwarder',  nic['addr']))
                 f.write("\n")
-
+                
             except IndexError:
                 pass
 
@@ -530,31 +564,7 @@ class WorkItemList(object):
             logging.info(item.__class__.__name__)
             item.display()
 
-
-def IPAFloatIP(session, plan):
-    return FloatIP(session, plan, 'ipa')
-
-
-def RDOFloatIP(session, plan):
-        return FloatIP(session, plan, 'rdo')
-
-
-def IPAServer(session, plan):
-    return NovaServer(session, plan, 'ipa')
-
-
-def RDOServer(session, plan):
-    return NovaServer(session, plan, 'rdo')
-
-
-def IPA(session, plan):
-    return WorkItemList([IPAServer, IPAFloatIP], session, plan)
-
-
-def RDO(session, plan):
-        return WorkItemList([RDOServer, RDOFloatIP], session, plan)
-
-
+    
 def PublicNetwork(session, plan):
     return Network(session, plan, 'public')
 
@@ -632,19 +642,27 @@ def build_work_item_list(work_item_factories):
     session = create_session()
     return WorkItemList(work_item_factories, session, plan)
 
-worker = build_work_item_list([
-    PublicNetwork,
-    IPA,
-    RDO
-])
-
 
 workers = {
     'all': build_work_item_list([
         PrivateNetworkList, PublicNetworkList,
-        IPAServer,  RDOServer, IPAFloatIP, RDOFloatIP, Inventory]),
-    'rdo': build_work_item_list([RDO]),
-    'ipa': build_work_item_list([IPA]),
+        AllServers, Inventory]),
+    'servers': build_work_item_list([AllServers, Inventory]),
+    'controller': build_work_item_list([
+        lambda session, plan: NovaServer(session, plan, "controller"),
+        lambda session, plan: FloatIP(session, plan, "controller"),
+        Inventory
+    ]),
+    'ipa': build_work_item_list([
+        lambda session, plan: NovaServer(session, plan, "ipa"),
+        lambda session, plan: FloatIP(session, plan, "ipa"),
+        Inventory
+    ]),
+    'gitlab': build_work_item_list([
+        lambda session, plan: NovaServer(session, plan, "gitlab"),
+        lambda session, plan: FloatIP(session, plan, "gitlab"),
+        Inventory
+    ]),
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
     'inventory': build_work_item_list([Inventory])
 }
