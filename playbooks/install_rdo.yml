@@ -1,6 +1,6 @@
 ---
-- hosts: rdo
-  remote_user: centos
+- hosts:rdo
+  remote_user: "{{cloud-user}}"
   sudo: yes
   name: install-rdo
   tasks:
@@ -20,6 +20,4 @@
   - command: sed -i 's/CONFIG_NEUTRON_INSTALL=y/CONFIG_NEUTRON_INSTALL=n/g' /root/answerfile.txt
   - command: sed -i "s/CONFIG_\(.*\)_PW=.*/CONFIG_\1_PW={{ rdo_password }} /g" /root/answerfile.txt
   - command: sed -i 's/CONFIG_KEYSTONE_SERVICE_NAME=keystone/CONFIG_KEYSTONE_SERVICE_NAME=httpd/g' /root/answerfile.txt
-#  - command: /usr/bin/packstack --debug --answer-file=/root/answerfile.txt
-
- 
+  - command: /usr/bin/packstack --debug --answer-file=/root/answerfile.txt
