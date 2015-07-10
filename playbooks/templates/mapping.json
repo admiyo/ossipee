@@ -1,0 +1,35 @@
+[
+     {
+         "local": [
+             {
+                 "user": {
+                     "name": "{0}",
+                     "id": "{0}",
+                      "domain": {"name": "Default"}
+                 }
+             }
+         ],
+         "remote": [
+             {
+                 "type": "REMOTE_USER"
+             }
+         ]
+     },
+     {
+         "local": [
+             {
+                 "groups": "{0}",
+                 "domain": {
+                     "name": "Default"
+                 }
+             }
+         ],
+         "remote": [
+             {
+                 "type": "REMOTE_USER_GROUPS",
+                 "blacklist": []
+             }
+         ]
+     }
+ ]
+

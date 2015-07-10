@@ -1,0 +1,28 @@
+[rhel-server]
+name=Red Hat Enterprise Linux $releasever - $basearch - Server
+baseurl=http://download.devel.redhat.com/composes/released/RHEL-7/7.1/Server/$basearch/os/
+#baseurl=http://download.devel.redhat.com/composes/released/RHEL-6/6.4/Server/$basearch/os/Server
+#baseurl=http://download.devel.redhat.com/composes/latest-RHEL6/6/Server/$basearch/os/Server
+enabled=1
+gpgcheck=0
+
+[rhel-ha]
+name=Red Hat Enterprise Linux $releasever - $basearch - HA
+baseurl=http://download.devel.redhat.com/composes/released/RHEL-6/6.4/Server/$basearch/os/HighAvailability
+#baseurl=http://download.devel.redhat.com/composes/latest-RHEL6/6/Server/$basearch/os/HighAvailability
+enabled=0
+gpgcheck=0
+
+
+[rhel-rs]
+name=Red Hat Enterprise Linux $releasever - $basearch - RS
+baseurl=http://download.devel.redhat.com/composes/released/RHEL-6/6.4/Server/$basearch/os/ResilientStorage
+#baseurl=http://download.devel.redhat.com/composes/latest-RHEL6/6/Server/$basearch/os/ResilientStorage
+enabled=0
+gpgcheck=0
+
+[rhel-z]
+name=Red Hat Enterprise Linux $releasever - $basearch - Z-Stream
+baseurl=http://download.lab.bos.redhat.com/rel-eng/repos/RHEL-6.4-Z/$basearch/
+enabled=0
+gpgcheck=0
