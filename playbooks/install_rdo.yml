@@ -1,6 +1,6 @@
 ---
-- hosts:rdo
-  remote_user: "{{cloud-user}}"
+- hosts: controller
+  remote_user: "{{cloud_user}}"
   sudo: yes
   name: install-rdo
   tasks:
