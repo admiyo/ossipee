@@ -1,0 +1,9 @@
+---
+- hosts: controller
+  remote_user: centos
+  sudo: yes
+  name: cleanup-rdo
+  tasks:
+    - shell: echo {{ ipa_admin_user_password }}  | kinit admin@OSP.TEST
+    - shell: command ipa host-del {{ ansible_fqdn }}
+    - shell: kdestroy 

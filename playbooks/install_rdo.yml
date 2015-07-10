@@ -4,7 +4,6 @@
   sudo: yes
   name: install-rdo
   tasks:
-  - hostname: name=rdo.ayoung
   - yum: name=cloud-init state=absent
   - yum: name=* state=latest
   - yum: name=ipa-client,epel-release state=latest
