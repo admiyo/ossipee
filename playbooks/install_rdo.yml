@@ -8,7 +8,7 @@
   - yum: name=cloud-init state=absent
   - yum: name=* state=latest
   - yum: name=ipa-client,epel-release state=latest
-  - command: sed -i "s/^nameserver .*/nameserver {{ ipa_forwarder }}/g" /etc/resolv.conf
+  - command: sed -i "s/^nameserver .*/nameserver {{ nameserver }}/g" /etc/resolv.conf
   - command: ipa-client-install -U -p admin@{{ ipa_realm }} -w {{ipa_admin_user_password }} --force
   - command:  yum install -y https://repos.fedorapeople.org/repos/openstack/openstack-kilo/rdo-release-kilo-1.noarch.rpm
   - command: setenforce permissive

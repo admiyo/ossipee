@@ -95,7 +95,7 @@ class Plan(object):
         self.hosts = {
             "ipa": {
                 "cloud_user": self.cloud_user,
-                "ipa_forwarder": "192.168.52.3",
+                "ipa_forwarder": self.forwarder,
                 "ipa_realm": self.domain_name.upper(),
                 "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
@@ -520,7 +520,7 @@ class Inventory(FileWorkItem):
         ipa_server = self.get_server_by_name(self.make_fqdn("ipa"))
         for nic in ipa_server.addresses[self.plan.name + '-public-net']:
             if nic['OS-EXT-IPS:type'] == 'fixed':
-                ipa_forwarder = nic['addr']
+                nameserver = nic['addr']
         
         for host, vars in self.plan.hosts.iteritems():
             try:
@@ -531,7 +531,7 @@ class Inventory(FileWorkItem):
                 f.write("[%s:vars]\n" % host)
                 for key, value in vars.iteritems():
                     f.write("%s=%s\n" % (key, value))
-                f.write("%s=%s\n" % ('ipa_forwarder',  nic['addr']))
+                f.write("%s=%s\n" % ('nameserver',  nameserver))
                 f.write("\n")
                 
             except IndexError:
