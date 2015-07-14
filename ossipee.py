@@ -92,10 +92,19 @@ class Plan(object):
                 'subnet_name': name + '-private-subnet',
                 'cidr': '192.168.178.0/24'},
         }
+        self.ipa_client_vars = {
+            "cloud_user": self.cloud_user,
+            "ipa_forwarder": self.forwarder,
+            "ipa_domain": self.domain_name,
+            "ipa_realm": self.domain_name.upper(),
+            "ipa_server_password": "FreeIPA4All",
+            "ipa_admin_user_password": "FreeIPA4All"
+        }
         self.hosts = {
             "ipa": {
                 "cloud_user": self.cloud_user,
                 "ipa_forwarder": self.forwarder,
+                "ipa_domain": self.domain_name,
                 "ipa_realm": self.domain_name.upper(),
                 "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
@@ -106,13 +115,12 @@ class Plan(object):
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             },
-            "gitlab": {
+            "compute": {
                 "cloud_user": self.cloud_user,
                 "ipa_realm": self.domain_name.upper(),
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             }
-
         }
 
     def make_fqdn(self, name):
@@ -521,7 +529,8 @@ class Inventory(FileWorkItem):
         for nic in ipa_server.addresses[self.plan.name + '-public-net']:
             if nic['OS-EXT-IPS:type'] == 'fixed':
                 nameserver = nic['addr']
-        
+
+        ipa_clients = []
         for host, vars in self.plan.hosts.iteritems():
             try:
                 server = self.get_server_by_name(self.make_fqdn(host))
@@ -533,11 +542,21 @@ class Inventory(FileWorkItem):
                     f.write("%s=%s\n" % (key, value))
                 f.write("%s=%s\n" % ('nameserver',  nameserver))
                 f.write("\n")
-                
+                ipa_clients.append(ip)
             except IndexError:
                 pass
 
+        f.write("[ipa_clients]\n")
+        for ip in ipa_clients:
+            f.write("%s\n" % ip)
+            
+        f.write("[%ipa_clients:vars]\n")
+        
+        for key, value in self.plan.ipa_client_vars.iteritems():
+            f.write("%s=%s\n" % (key, value))
 
+
+            
 class WorkItemList(object):
 
     def __init__(self, work_item_factories, session, plan):
