@@ -112,12 +112,14 @@ class Plan(object):
             "controller": {
                 "cloud_user": self.cloud_user,
                 "ipa_realm": self.domain_name.upper(),
+                "ipa_domain": self.domain_name,
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             },
             "compute": {
                 "cloud_user": self.cloud_user,
                 "ipa_realm": self.domain_name.upper(),
+                "ipa_domain": self.domain_name,
                 "rdo_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
             }
@@ -542,7 +544,9 @@ class Inventory(FileWorkItem):
                     f.write("%s=%s\n" % (key, value))
                 f.write("%s=%s\n" % ('nameserver',  nameserver))
                 f.write("\n")
-                ipa_clients.append(ip)
+                
+                if not host == 'ipa':
+                    ipa_clients.append(ip)
             except IndexError:
                 pass
 
@@ -554,6 +558,7 @@ class Inventory(FileWorkItem):
         
         for key, value in self.plan.ipa_client_vars.iteritems():
             f.write("%s=%s\n" % (key, value))
+
 
 
             
