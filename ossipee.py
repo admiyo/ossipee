@@ -27,7 +27,8 @@ fqdn:  %(fqdn)s
 '''
 
 
-class Plan(object):
+
+class Configuration(object):
     def _default_config_options(self, config, outfile):
         config.add_section('scope')
         config.set('scope', 'name', self.username)
@@ -35,8 +36,9 @@ class Plan(object):
         config.set('scope', 'flavor',  'm1.medium')
         config.set('scope', 'image',  'centos-7-cloud')
         config.set('scope', 'forwarder',  '192.168.52.3')
-        config.set('scope','cloud_user', 'centos')
+        config.set('scope', 'cloud_user', 'centos')
         config.write(outfile)
+
 
     def __init__(self):
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
@@ -73,12 +75,26 @@ class Plan(object):
                           self.config_file)
             exit(1)
 
-        name = self.name
+
+class Plan(object):
+
+    def __init__(self):
+        self.configuration = Configuration()
+
+        name = self.configuration.name
+        self.name = self.configuration.name
+        self.cloud_user = self.configuration.cloud_user
+        self.forwarder =  self.configuration.forwarder
+        self.image =  self.configuration.image
+        self.flavor =  self.configuration.flavor
+        self.security_groups = self.configuration.security_groups
+        self.cloud_user = self.configuration.cloud_user 
+        self.cloud_user = self.configuration.cloud_user 
+        self.key = self.configuration.key 
+        
         self.domain_name = name + ".test"
-        self.inventory_dir = self.config_dir + "/inventory/"
+        self.inventory_dir = self.configuration.config_dir + "/inventory/"
         self.inventory_file = self.inventory_dir + name + ".ini"
-        self.variable_dir = self.config_dir + "/variables/"
-        self.variable_file = self.variable_dir + name + ".ini"
 
         self.networks = {
             'public': {
@@ -108,30 +124,38 @@ class Plan(object):
                 "ipa_realm": self.domain_name.upper(),
                 "ipa_server_password": "FreeIPA4All",
                 "ipa_admin_user_password": "FreeIPA4All"
-            },
-            "controller": {
-                "cloud_user": self.cloud_user,
-                "ipa_realm": self.domain_name.upper(),
-                "ipa_domain": self.domain_name,
-                "rdo_password": "FreeIPA4All",
-                "ipa_admin_user_password": "FreeIPA4All"
-            },
-            "compute": {
-                "cloud_user": self.cloud_user,
-                "ipa_realm": self.domain_name.upper(),
-                "ipa_domain": self.domain_name,
-                "rdo_password": "FreeIPA4All",
-                "ipa_admin_user_password": "FreeIPA4All"
             }
         }
 
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
+    def add_host(self, name):
+        if self.hosts.get(name):
+            print ('host %s already exists.' % name)
+            return
+        self.hosts[name] = {
+            "cloud_user": self.cloud_user,
+            "cloud_user": self.cloud_user,
+            "ipa_forwarder": self.forwarder,
+            "ipa_domain": self.domain_name,
+            "ipa_realm": self.domain_name.upper(),
+            "ipa_server_password": "FreeIPA4All",
+            "ipa_admin_user_password": "FreeIPA4All"
+        }
+
+def create_plan():    
+    plan = Plan()
+    for host in ['openstack']:
+        plan.add_host(host)
+    return plan
+
+
+plan = create_plan()
+
 
 class Scorecard(object):
     def __init__(self, server_list, plan):
-        self.plan = plan
         self.hosts = dict()
         for server in server_list:
             self.hosts[server.name] = dict()
@@ -660,9 +684,8 @@ def create_session():
         session = ksc_session.Session(auth=get_auth())
         return session
 
-
+    
 def build_work_item_list(work_item_factories):
-    plan = Plan()
     session = create_session()
     return WorkItemList(work_item_factories, session, plan)
 
