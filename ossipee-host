@@ -1,0 +1,20 @@
+#!/usr/bin/python
+import argparse
+import logging
+import ossipee
+
+logging.basicConfig(level=logging.INFO)
+
+
+def get_args():
+    parser = argparse.ArgumentParser(
+        description='Add a new host to the current plan.')
+    parser.add_argument('host', nargs='?', default='deleteme',
+                        help='New Host to add"')
+    args = parser.parse_args()
+    return args
+
+
+#print (get_args().host)
+ossipee.create_host(get_args().host)
+

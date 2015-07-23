@@ -108,7 +108,11 @@ class Plan(object):
                 'subnet_name': name + '-private-subnet',
                 'cidr': '192.168.178.0/24'},
         }
-        self.ipa_client_vars = {
+        self.ipa_client_vars = self._get_client_vars()
+        self.hosts = {}
+
+    def _get_client_vars(self):
+        return {
             "cloud_user": self.cloud_user,
             "ipa_forwarder": self.forwarder,
             "ipa_domain": self.domain_name,
@@ -116,17 +120,7 @@ class Plan(object):
             "ipa_server_password": "FreeIPA4All",
             "ipa_admin_user_password": "FreeIPA4All"
         }
-        self.hosts = {
-            "ipa": {
-                "cloud_user": self.cloud_user,
-                "ipa_forwarder": self.forwarder,
-                "ipa_domain": self.domain_name,
-                "ipa_realm": self.domain_name.upper(),
-                "ipa_server_password": "FreeIPA4All",
-                "ipa_admin_user_password": "FreeIPA4All"
-            }
-        }
-
+        
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
@@ -134,19 +128,11 @@ class Plan(object):
         if self.hosts.get(name):
             print ('host %s already exists.' % name)
             return
-        self.hosts[name] = {
-            "cloud_user": self.cloud_user,
-            "cloud_user": self.cloud_user,
-            "ipa_forwarder": self.forwarder,
-            "ipa_domain": self.domain_name,
-            "ipa_realm": self.domain_name.upper(),
-            "ipa_server_password": "FreeIPA4All",
-            "ipa_admin_user_password": "FreeIPA4All"
-        }
+        self.hosts[name] = self._get_client_vars()
 
 def create_plan():    
     plan = Plan()
-    for host in ['openstack']:
+    for host in ['ipa', 'openstack']:
         plan.add_host(host)
     return plan
 
@@ -470,9 +456,9 @@ class NovaServer(WorkItem):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
 
-class AllServers(object):
+class AllServers(WorkItem):
     def __init__(self, session, plan):
-        
+        super(AllServers, self).__init__(session, plan, "AllServers")
         self.servers=WorkItemList([], session, plan)
         self.servers.work_items = [NovaServer(session, plan, server_name)
                                    for server_name in plan.hosts]
@@ -490,8 +476,8 @@ class AllServers(object):
         self.float_ips.display()
     
     def teardown(self):
-        self.float_ips.teardown()
-        self.servers.teardown()
+        for server in self.list_servers():
+            self.nova.servers.delete(server.id)
     
 
 class IPAAddress(WorkItem):
@@ -705,9 +691,9 @@ workers = {
         lambda session, plan: FloatIP(session, plan, "ipa"),
         Inventory
     ]),
-    'gitlab': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, "gitlab"),
-        lambda session, plan: FloatIP(session, plan, "gitlab"),
+    'openstack': build_work_item_list([
+        lambda session, plan: NovaServer(session, plan, "openstack"),
+        lambda session, plan: FloatIP(session, plan, "openstack"),
         Inventory
     ]),
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
@@ -731,6 +717,15 @@ def enable_logging():
 def create(worker='all'):
     workers[worker].create()
 
+def create_host(hostname):
+    plan.add_host(hostname)
+    worker =  build_work_item_list([
+        lambda session, plan: NovaServer(session, plan, hostname),
+        lambda session, plan: FloatIP(session, plan, hostname),
+        Inventory
+    ]).create()
+
+    
 
 def teardown(worker='all'):
     workers[worker].teardown()
