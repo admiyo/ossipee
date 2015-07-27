@@ -34,12 +34,11 @@ class Configuration(object):
         config.set('scope', 'name', self.username)
         config.set('scope', 'pubkey', self.key)
         config.set('scope', 'flavor',  'm1.medium')
-        config.set('scope', 'image',  'centos-7-cloud')
+        config.set('scope', 'image',  'rhel-guest-image-7.1-20150224.0')
         config.set('scope', 'forwarder',  '192.168.52.3')
-        config.set('scope', 'cloud_user', 'centos')
+        config.set('scope', 'cloud_user', 'cloud-user')
         config.write(outfile)
-
-
+        
     def __init__(self):
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
