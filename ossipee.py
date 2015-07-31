@@ -31,12 +31,10 @@ fqdn:  %(fqdn)s
 class Configuration(object):
     def _default_config_options(self, config, outfile):
         config.add_section('scope')
+        config.set('scope', 'profile', 'rhel7')
         config.set('scope', 'name', self.username)
         config.set('scope', 'pubkey', self.key)
-        config.set('scope', 'flavor',  'm1.medium')
-        config.set('scope', 'image',  'rhel-guest-image-7.1-20150224.0')
         config.set('scope', 'forwarder',  '192.168.52.3')
-        config.set('scope', 'cloud_user', 'cloud-user')
         config.write(outfile)
         
     def __init__(self):
@@ -59,21 +57,38 @@ class Configuration(object):
         config = ConfigParser.ConfigParser()
         config.read(self.config_file)
         try:
-            self.name = config.get("scope", "name")
-            self.key = config.get("scope", "pubkey")
-            self.flavor = config.get("scope", 'flavor')
-            self.image = config.get("scope", 'image')
-            self.forwarder = config.get("scope", 'forwarder')
+            self.profile=config.get('scope', 'profile')
+            self.name = config.get('scope', 'name')
+            self.key = config.get('scope', 'pubkey')
+            self.forwarder = config.get('scope', 'forwarder')
             self.security_groups = ['default']
-            self.cloud_user = config.get("scope", "cloud_user")
 
 
         except ConfigParser.NoSectionError:
             self._default_config_options(config, f)
-            logging.error("No Scope Section in %s, wrote defaults" %
+            logging.error('No Scope Section in %s, wrote defaults' %
                           self.config_file)
             exit(1)
 
+profiles = {
+    'centos7': {
+        'cloud_user': 'centos',
+        'image': 'centos-7-cloud',
+        'flavor': 'm1.medium',
+    },
+    'rhel7': {
+        'cloud_user': 'cloud-user',
+        'image': 'rhel-guest-image-7.1-20150224.0',
+        'flavor': 'm1.medium',
+    },
+    'f22':{
+        'cloud_user': 'fedora',
+        'image': 'Fedora 22 Cloud Image',
+        'flavor': 'm1.medium',
+    }
+}
+    
+            
 
 class Plan(object):
 
@@ -82,18 +97,14 @@ class Plan(object):
 
         name = self.configuration.name
         self.name = self.configuration.name
-        self.cloud_user = self.configuration.cloud_user
         self.forwarder =  self.configuration.forwarder
-        self.image =  self.configuration.image
-        self.flavor =  self.configuration.flavor
         self.security_groups = self.configuration.security_groups
-        self.cloud_user = self.configuration.cloud_user 
-        self.cloud_user = self.configuration.cloud_user 
-        self.key = self.configuration.key 
+        self.key = self.configuration.key
+        self.profile = profiles[self.configuration.profile]
         
-        self.domain_name = name + ".test"
-        self.inventory_dir = self.configuration.config_dir + "/inventory/"
-        self.inventory_file = self.inventory_dir + name + ".ini"
+        self.domain_name = name + '.test'
+        self.inventory_dir = self.configuration.config_dir + '/inventory/'
+        self.inventory_file = self.inventory_dir + name + '.ini'
 
         self.networks = {
             'public': {
@@ -112,12 +123,12 @@ class Plan(object):
 
     def _get_client_vars(self):
         return {
-            "cloud_user": self.cloud_user,
-            "ipa_forwarder": self.forwarder,
-            "ipa_domain": self.domain_name,
-            "ipa_realm": self.domain_name.upper(),
-            "ipa_server_password": "FreeIPA4All",
-            "ipa_admin_user_password": "FreeIPA4All"
+            'cloud_user': self.profile['cloud_user'],
+            'ipa_forwarder': self.forwarder,
+            'ipa_domain': self.domain_name,
+            'ipa_realm': self.domain_name.upper(),
+            'ipa_server_password': 'FreeIPA4All',
+            'ipa_admin_user_password': 'FreeIPA4All'
         }
         
     def make_fqdn(self, name):
@@ -347,7 +358,8 @@ class FloatIP(WorkItem):
                     ['ssh',
                      '-o', 'StrictHostKeyChecking=no',
                      '-o', 'PasswordAuthentication=no',
-                     '-l', self.plan.cloud_user, ip_address, 'hostname'])
+                     '-l', self.plan.profile['cloud_user'],
+                     ip_address, 'hostname'])
                 attempts = 0
             except subprocess.CalledProcessError:
                 logging.info(
@@ -383,14 +395,14 @@ class NovaServer(WorkItem):
     def _host(self, name, user_data):
 
         nics = []
-        for net_name in ["public", "private"]:
+        for net_name in ['public', 'private']:
             for network in self._networks_response(net_name)['networks']:
                 nics.append({'net-id': network['id']})
 
         response = self.nova.servers.create(
             self.fqdn(),
-            self.get_image_id(self.plan.image),
-            self.get_flavor_id(self.plan.flavor),
+            self.get_image_id(self.plan.profile['image']),
+            self.get_flavor_id(self.plan.profile['flavor']),
             security_groups=self.plan.security_groups,
             nics=nics,
             meta=None,
@@ -457,7 +469,7 @@ class NovaServer(WorkItem):
 
 class AllServers(WorkItem):
     def __init__(self, session, plan):
-        super(AllServers, self).__init__(session, plan, "AllServers")
+        super(AllServers, self).__init__(session, plan, 'AllServers')
         self.servers=WorkItemList([], session, plan)
         self.servers.work_items = [NovaServer(session, plan, server_name)
                                    for server_name in plan.hosts]
@@ -504,21 +516,21 @@ class FileWorkItem(WorkItem):
 
         except IOError as ioerror:
             if not os.path.exists(self.directory):
-                print("Directory %s does not exist" %
+                print('Directory %s does not exist' %
                       self.directory)
                 return
 
             if not os.path.isdir(self.directory):
-                print("%s exists but is not a directory" %
+                print('%s exists but is not a directory' %
                       self.directory)
                 return
 
             if not os.path.exists(self.file_name):
-                print("File %s does not exist" %
+                print('File %s does not exist' %
                       self.file_name)
                 return
 
-            print("Error reading file")
+            print('Error reading file')
             print(ioerror)
 
     def teardown(self):
@@ -536,7 +548,7 @@ class Inventory(FileWorkItem):
     def write_contents(self, f):
 
 
-        ipa_server = self.get_server_by_name(self.make_fqdn("ipa"))
+        ipa_server = self.get_server_by_name(self.make_fqdn('ipa'))
         for nic in ipa_server.addresses[self.plan.name + '-public-net']:
             if nic['OS-EXT-IPS:type'] == 'fixed':
                 nameserver = nic['addr']
@@ -546,27 +558,27 @@ class Inventory(FileWorkItem):
             try:
                 server = self.get_server_by_name(self.make_fqdn(host))
                 ip = self.floating_ip_for_server(server)
-                f.write("[%s]\n" % host)
-                f.write("%s\n\n" % ip)
-                f.write("[%s:vars]\n" % host)
+                f.write('[%s]\n' % host)
+                f.write('%s\n\n' % ip)
+                f.write('[%s:vars]\n' % host)
                 for key, value in vars.iteritems():
-                    f.write("%s=%s\n" % (key, value))
-                f.write("%s=%s\n" % ('nameserver',  nameserver))
-                f.write("\n")
+                    f.write('%s=%s\n' % (key, value))
+                f.write('%s=%s\n' % ('nameserver',  nameserver))
+                f.write('\n')
                 
                 if not host == 'ipa':
                     ipa_clients.append(ip)
             except IndexError:
                 pass
 
-        f.write("[ipa_clients]\n")
+        f.write('[ipa_clients]\n')
         for ip in ipa_clients:
-            f.write("%s\n" % ip)
+            f.write('%s\n' % ip)
             
-        f.write("[%ipa_clients:vars]\n")
+        f.write('[%ipa_clients:vars]\n')
         
         for key, value in self.plan.ipa_client_vars.iteritems():
-            f.write("%s=%s\n" % (key, value))
+            f.write('%s=%s\n' % (key, value))
 
 
 
@@ -681,18 +693,18 @@ workers = {
         AllServers, Inventory]),
     'servers': build_work_item_list([AllServers, Inventory]),
     'controller': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, "controller"),
-        lambda session, plan: FloatIP(session, plan, "controller"),
+        lambda session, plan: NovaServer(session, plan, 'controller'),
+        lambda session, plan: FloatIP(session, plan, 'controller'),
         Inventory
     ]),
     'ipa': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, "ipa"),
-        lambda session, plan: FloatIP(session, plan, "ipa"),
+        lambda session, plan: NovaServer(session, plan, 'ipa'),
+        lambda session, plan: FloatIP(session, plan, 'ipa'),
         Inventory
     ]),
     'openstack': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, "openstack"),
-        lambda session, plan: FloatIP(session, plan, "openstack"),
+        lambda session, plan: NovaServer(session, plan, 'openstack'),
+        lambda session, plan: FloatIP(session, plan, 'openstack'),
         Inventory
     ]),
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
