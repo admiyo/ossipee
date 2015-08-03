@@ -370,9 +370,11 @@ class FloatIP(WorkItem):
                 time.sleep(5)
 
     def create(self):
-        server = self.get_server_by_name(self.make_fqdn(self.name))
+        fqdn = self.make_fqdn(self.name)
+        server = self.get_server_by_name(fqdn)
         ip_address = self.assign_next_ip(server)
         self.reset_ssh(ip_address)
+        self.reset_ssh(fqdn)
 
     def display(self):
         try:
