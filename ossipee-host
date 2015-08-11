@@ -15,6 +15,4 @@ def get_args():
     return args
 
 
-#print (get_args().host)
 ossipee.create_host(get_args().host)
-

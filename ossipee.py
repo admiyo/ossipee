@@ -27,7 +27,6 @@ fqdn:  %(fqdn)s
 '''
 
 
-
 class Configuration(object):
     def _default_config_options(self, config, outfile):
         config.add_section('scope')
@@ -57,12 +56,11 @@ class Configuration(object):
         config = ConfigParser.ConfigParser()
         config.read(self.config_file)
         try:
-            self.profile=config.get('scope', 'profile')
+            self.profile = config.get('scope', 'profile')
             self.name = config.get('scope', 'name')
             self.key = config.get('scope', 'pubkey')
             self.forwarder = config.get('scope', 'forwarder')
             self.security_groups = ['default']
-
 
         except ConfigParser.NoSectionError:
             self._default_config_options(config, f)
@@ -81,7 +79,7 @@ profiles = {
         'image': 'rhel-guest-image-7.1-20150224.0',
         'flavor': 'm1.medium',
     },
-    'f22':{
+    'f22': {
         'cloud_user': 'fedora',
         'image': 'Fedora 22 Cloud Image',
         'flavor': 'm1.medium',
@@ -89,15 +87,13 @@ profiles = {
 }
 
 
-
 class Plan(object):
-
     def __init__(self):
         self.configuration = Configuration()
 
         name = self.configuration.name
         self.name = self.configuration.name
-        self.forwarder =  self.configuration.forwarder
+        self.forwarder = self.configuration.forwarder
         self.security_groups = self.configuration.security_groups
         self.key = self.configuration.key
         self.profile = profiles[self.configuration.profile]
@@ -139,6 +135,7 @@ class Plan(object):
             print ('host %s already exists.' % name)
             return
         self.hosts[name] = self._get_client_vars()
+
 
 def create_plan():
     plan = Plan()
@@ -446,20 +443,20 @@ class NovaServer(WorkItem):
         for server in self.host_list():
             self.nova.servers.delete(server.id)
 
+
 class AllServers(WorkItem):
     def __init__(self, session, plan):
         super(AllServers, self).__init__(session, plan, 'AllServers')
-        self.servers=WorkItemList([], session, plan)
+        self.servers = WorkItemList([], session, plan)
         self.servers.work_items = [NovaServer(session, plan, server_name)
                                    for server_name in plan.hosts]
-        self.float_ips=WorkItemList([], session, plan)
-        self.float_ips.work_items =[FloatIP(session, plan,  server_name)
-                                    for server_name in plan.hosts]
+        self.float_ips = WorkItemList([], session, plan)
+        self.float_ips.work_items = [FloatIP(session, plan,  server_name)
+                                     for server_name in plan.hosts]
 
     def create(self):
         self.servers.create()
         self.float_ips.create()
-
 
     def display(self):
         self.servers.display()
@@ -516,8 +513,6 @@ class Inventory(FileWorkItem):
         self.file_name = self.plan.inventory_file
 
     def write_contents(self, f):
-
-
         ipa_server = self.get_server_by_name(self.make_fqdn('ipa'))
         for nic in ipa_server.addresses[self.plan.name + '-public-net']:
             if nic['OS-EXT-IPS:type'] == 'fixed':
@@ -549,8 +544,6 @@ class Inventory(FileWorkItem):
 
         for key, value in self.plan.ipa_client_vars.iteritems():
             f.write('%s=%s\n' % (key, value))
-
-
 
 
 class WorkItemList(object):
@@ -698,14 +691,14 @@ def enable_logging():
 def create(worker='all'):
     workers[worker].create()
 
+
 def create_host(hostname):
     plan.add_host(hostname)
-    worker =  build_work_item_list([
+    worker = build_work_item_list([
         lambda session, plan: NovaServer(session, plan, hostname),
         lambda session, plan: FloatIP(session, plan, hostname),
         Inventory
     ]).create()
-
 
 
 def teardown(worker='all'):
@@ -751,17 +744,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-class Scorecard(object):
-    def __init__(self, server_list, plan):
-        self.hosts = dict()
-        for server in server_list:
-            self.hosts[server.name] = dict()
-            for net in server.addresses:
-                for addr in server.addresses[net]:
-                    if addr['OS-EXT-IPS:type'] == 'fixed':
-                        self.hosts[server.name]['fixed'] = addr['addr']
-                    if addr['OS-EXT-IPS:type'] == 'floating':
-                        self.hosts[server.name]['floating'] = addr['addr']
 
     def ipa_resolver(self):
         return self.hosts[self.plan.make_fqdn('ipa')]['fixed']
@@ -771,5 +753,3 @@ class Scorecard(object):
         for host in self.hosts:
             logging.info(host)
             logging.info(self.hosts[host])
-
-

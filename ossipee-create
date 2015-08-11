@@ -6,4 +6,3 @@ import ossipee
 logging.basicConfig(level=logging.INFO)
 
 ossipee.create(ossipee.get_args().worker)
-
