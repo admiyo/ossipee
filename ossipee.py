@@ -36,7 +36,7 @@ class Configuration(object):
         config.set('scope', 'pubkey', self.key)
         config.set('scope', 'forwarder',  '192.168.52.3')
         config.write(outfile)
-        
+
     def __init__(self):
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
@@ -87,8 +87,8 @@ profiles = {
         'flavor': 'm1.medium',
     }
 }
-    
-            
+
+
 
 class Plan(object):
 
@@ -101,7 +101,7 @@ class Plan(object):
         self.security_groups = self.configuration.security_groups
         self.key = self.configuration.key
         self.profile = profiles[self.configuration.profile]
-        
+
         self.domain_name = name + '.test'
         self.inventory_dir = self.configuration.config_dir + '/inventory/'
         self.inventory_file = self.inventory_dir + name + '.ini'
@@ -130,7 +130,7 @@ class Plan(object):
             'ipa_server_password': 'FreeIPA4All',
             'ipa_admin_user_password': 'FreeIPA4All'
         }
-        
+
     def make_fqdn(self, name):
         return name + '.' + self.domain_name
 
@@ -140,7 +140,7 @@ class Plan(object):
             return
         self.hosts[name] = self._get_client_vars()
 
-def create_plan():    
+def create_plan():
     plan = Plan()
     for host in ['ipa', 'openstack']:
         plan.add_host(host)
@@ -148,28 +148,6 @@ def create_plan():
 
 
 plan = create_plan()
-
-
-class Scorecard(object):
-    def __init__(self, server_list, plan):
-        self.hosts = dict()
-        for server in server_list:
-            self.hosts[server.name] = dict()
-            for net in server.addresses:
-                for addr in server.addresses[net]:
-                    if addr['OS-EXT-IPS:type'] == 'fixed':
-                        self.hosts[server.name]['fixed'] = addr['addr']
-                    if addr['OS-EXT-IPS:type'] == 'floating':
-                        self.hosts[server.name]['floating'] = addr['addr']
-
-    def ipa_resolver(self):
-        return self.hosts[self.plan.make_fqdn('ipa')]['fixed']
-
-    def display(self):
-        logging.info('ipa resolver = ' + self.ipa_resolver())
-        for host in self.hosts:
-            logging.info(host)
-            logging.info(self.hosts[host])
 
 
 class WorkItem(object):
@@ -477,28 +455,19 @@ class AllServers(WorkItem):
         self.float_ips=WorkItemList([], session, plan)
         self.float_ips.work_items =[FloatIP(session, plan,  server_name)
                                     for server_name in plan.hosts]
-    
+
     def create(self):
         self.servers.create()
         self.float_ips.create()
-                
-    
+
+
     def display(self):
         self.servers.display()
         self.float_ips.display()
-    
+
     def teardown(self):
         for server in self.list_servers():
             self.nova.servers.delete(server.id)
-    
-
-class IPAAddress(WorkItem):
-    def display_static_address(self):
-        scorecard = Scorecard(self.list_servers(), self.plan)
-        scorecard.display()
-
-    def display(self):
-        self.display_static_address()
 
 
 class FileWorkItem(WorkItem):
@@ -566,7 +535,7 @@ class Inventory(FileWorkItem):
                     f.write('%s=%s\n' % (key, value))
                 f.write('%s=%s\n' % ('nameserver',  nameserver))
                 f.write('\n')
-                
+
                 if not host == 'ipa':
                     ipa_clients.append(ip)
             except IndexError:
@@ -575,15 +544,15 @@ class Inventory(FileWorkItem):
         f.write('[ipa_clients]\n')
         for ip in ipa_clients:
             f.write('%s\n' % ip)
-            
+
         f.write('[%ipa_clients:vars]\n')
-        
+
         for key, value in self.plan.ipa_client_vars.iteritems():
             f.write('%s=%s\n' % (key, value))
 
 
 
-            
+
 class WorkItemList(object):
 
     def __init__(self, work_item_factories, session, plan):
@@ -610,7 +579,7 @@ class WorkItemList(object):
             logging.info(item.__class__.__name__)
             item.display()
 
-    
+
 def PublicNetwork(session, plan):
     return Network(session, plan, 'public')
 
@@ -682,7 +651,7 @@ def create_session():
         session = ksc_session.Session(auth=get_auth())
         return session
 
-    
+
 def build_work_item_list(work_item_factories):
     session = create_session()
     return WorkItemList(work_item_factories, session, plan)
@@ -737,7 +706,7 @@ def create_host(hostname):
         Inventory
     ]).create()
 
-    
+
 
 def teardown(worker='all'):
     workers[worker].teardown()
@@ -782,3 +751,25 @@ def main():
 
 if __name__ == '__main__':
     main()
+class Scorecard(object):
+    def __init__(self, server_list, plan):
+        self.hosts = dict()
+        for server in server_list:
+            self.hosts[server.name] = dict()
+            for net in server.addresses:
+                for addr in server.addresses[net]:
+                    if addr['OS-EXT-IPS:type'] == 'fixed':
+                        self.hosts[server.name]['fixed'] = addr['addr']
+                    if addr['OS-EXT-IPS:type'] == 'floating':
+                        self.hosts[server.name]['floating'] = addr['addr']
+
+    def ipa_resolver(self):
+        return self.hosts[self.plan.make_fqdn('ipa')]['fixed']
+
+    def display(self):
+        logging.info('ipa resolver = ' + self.ipa_resolver())
+        for host in self.hosts:
+            logging.info(host)
+            logging.info(self.hosts[host])
+
+
