@@ -11,12 +11,13 @@ import time
 
 import ConfigParser
 
+from keystoneclient import session as ksc_session
+from keystoneclient.auth.identity import v3
+from keystoneclient.openstack.common.apiclient import exceptions
+from keystoneclient.v3 import client as keystone_v3
 from neutronclient.neutron import client as neutronclient
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
-from keystoneclient import session as ksc_session
-from keystoneclient.auth.identity import v3
-from keystoneclient.v3 import client as keystone_v3
 
 
 user_data_template = '''
@@ -211,6 +212,10 @@ class Network(WorkItem):
             name=self.plan.networks[self.name]['network_name'])
 
     def create(self):
+        for net in self._networks_response()['networks']:
+            if net['name'] == self.plan.networks[self.name]['network_name']:
+                return
+
         network = self.neutron.create_network(
             {'network':
              {'name': self.plan.networks[self.name]['network_name'],
@@ -227,6 +232,10 @@ class Network(WorkItem):
 
 class SubNet(WorkItem):
     def create(self):
+        for net in self._subnet_response(self.name)['subnets']:
+            if net['name'] == self.plan.networks[self.name]['subnet_name']:
+                return
+
         network = self._networks_response(self.name)['networks'][0]
         subnet = self.neutron.create_subnet(
             body={
@@ -252,6 +261,9 @@ class SubNet(WorkItem):
 class Router(WorkItem):
 
     def create(self):
+        if len(self._router_response(self.name)['routers']) > 0:
+            return
+
         router = self.neutron.create_router(
             body={'router': {
                 'name': self.plan.networks[self.name]['router_name'],
@@ -272,9 +284,18 @@ class Router(WorkItem):
 
 class RouterInterface(WorkItem):
     def create(self):
-        self.neutron.add_interface_router(
-            self._router_response(self.name)['routers'][0]['id'],
-            {'subnet_id': self._subnet_id(self.name)})
+        subnet_id = self._subnet_id(self.name)
+        if subnet_id is None:
+            return
+        router_id = self._router_response(self.name)['routers'][0]['id']
+        if router_id is None:
+            return
+        try:
+            self.neutron.add_interface_router(
+                router_id,
+                {'subnet_id': subnet_id})
+        except exceptions.BadRequest:
+            logging.warn('interface_router (probably) already exists')
 
     def display(self):
         for router in self._router_response(self.name)['routers']:
@@ -286,11 +307,8 @@ class RouterInterface(WorkItem):
     def teardown(self):
         for router in self._router_response(self.name)['routers']:
             for subnet in self._subnet_response(self.name)['subnets']:
-                try:
-                    self.neutron.remove_interface_router(
-                        router['id'], {'subnet_id': subnet['id']})
-                except Exception:
-                    pass
+                self.neutron.remove_interface_router(
+                    router['id'], {'subnet_id': subnet['id']})
 
 
 class FloatIP(WorkItem):
@@ -345,6 +363,11 @@ class FloatIP(WorkItem):
                 time.sleep(5)
 
     def create(self):
+        server = self.get_server_by_name(self.make_fqdn(self.name))
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                return
+
         fqdn = self.make_fqdn(self.name)
         server = self.get_server_by_name(fqdn)
         ip_address = self.assign_next_ip(server)
@@ -369,6 +392,8 @@ class NovaServer(WorkItem):
         return user_data_template
 
     def _host(self, name, user_data):
+        if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
+            return
 
         nics = []
         for net_name in ['public', 'private']:
@@ -564,8 +589,12 @@ class WorkItemList(object):
 
             try:
                 item.teardown()
-            except Exception:
-                pass
+            except exceptions.Conflict:
+                logging.info(
+                    'Teardown of work item failed. ' +
+                    'Waiting 1 second to try again.')
+                time.sleep(1)
+                item.teardown()
 
     def display(self):
         for item in self.work_items:
