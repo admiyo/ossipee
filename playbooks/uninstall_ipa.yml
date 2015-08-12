@@ -1,7 +1,0 @@
----
-- hosts: ipa
-  remote_user: "{{cloud_user}}"
-  sudo: yes
-  name: install-ipa
-  tasks:
-  - shell: ipa-server-install --uninstall -U

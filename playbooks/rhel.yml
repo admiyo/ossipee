@@ -1,8 +1,0 @@
----
-- hosts: all
-  remote_user: "{{ cloud_user }}"
-  sudo: yes
-  name: update-rhel
-
-  tasks:
-  - copy: src=templates/rhel.repo dest=/etc/yum.repos.d
