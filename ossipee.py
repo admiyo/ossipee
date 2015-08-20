@@ -80,6 +80,11 @@ profiles = {
         'image': 'rhel-guest-image-7.1-20150224.0',
         'flavor': 'm1.medium',
     },
+    'rhel6': {
+        'cloud_user': 'cloud-user',
+        'image': 'rhel-6.6-latest',
+        'flavor': 'm1.medium',
+    },
     'f22': {
         'cloud_user': 'fedora',
         'image': 'Fedora 22 Cloud Image',
@@ -469,6 +474,46 @@ class NovaServer(WorkItem):
             self.nova.servers.delete(server.id)
 
 
+class HostEntries(WorkItem):
+    def __init__(self, session, plan):
+        super(HostEntries, self).__init__(session, plan, 'hosts')
+        self.host_file='/etc/hosts'
+
+    def fetch_float_ip_from_server(self, server_name):
+        server = self.get_server_by_name(self.make_fqdn(server_name))
+        for float in self.nova.floating_ips.list():
+            if float.instance_id == server.id:
+                return float.ip
+
+    def create(self):
+        self.teardown()
+        for host in self.plan.hosts:
+            ip =  self.fetch_float_ip_from_server(host)
+            command = "$ a %s %s.%s" % (ip, host,self.plan.domain_name)
+            process = subprocess.Popen(
+                ['sudo', 'sed', '-i', command, self.host_file],
+
+                stdout=subprocess.PIPE )
+            out, err = process.communicate()
+        self.display()
+
+    def display(self):
+        process = subprocess.Popen(
+            ['sudo', 'grep', '-e', "%s$" % self.plan.domain_name, self.host_file],
+            stdout=subprocess.PIPE )
+        out, err = process.communicate()
+        print(out)
+
+    def teardown(self):
+        command = "/%s$/ d" % self.plan.domain_name
+
+        process = subprocess.Popen(
+            ['sudo', 'sed', '-i', command, self.host_file],
+
+            stdout=subprocess.PIPE )
+        out, err = process.communicate()
+        self.display()
+
 class AllServers(WorkItem):
     def __init__(self, session, plan):
         super(AllServers, self).__init__(session, plan, 'AllServers')
@@ -700,7 +745,8 @@ workers = {
         Inventory
     ]),
     'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
-    'inventory': build_work_item_list([Inventory])
+    'inventory': build_work_item_list([Inventory]),
+    'hosts_entries': build_work_item_list([HostEntries])
 }
 
 
