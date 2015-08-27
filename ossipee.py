@@ -768,15 +768,6 @@ def create(worker='all'):
     workers[worker].create()
 
 
-def create_host(hostname):
-    plan.add_host(hostname)
-    worker = build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, hostname),
-        lambda session, plan: FloatIP(session, plan, hostname),
-        Inventory
-    ]).create()
-
-
 def teardown(worker='all'):
     workers[worker].teardown()
 
@@ -817,6 +808,67 @@ def main():
         'success': True,
         'args': args_data
     })
+
+
+class Application(object):
+
+    description = ''
+
+    def __init__(self, description=None):
+        self._session = None
+        self._args = None
+        self._plan = None
+
+        if description:
+            self.description = description
+
+    @property
+    def session(self):
+        if not self._session:
+            OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
+            OS_USERNAME = os.environ.get('OS_USERNAME')
+            OS_PASSWORD = os.environ.get('OS_PASSWORD')
+            OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
+            OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
+            OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
+
+            if OS_AUTH_URL is None:
+                logging.error('OS_AUTH_URL not set.  Aborting.')
+                sys.exit(-1)
+
+            auth = v3.Password(auth_url=OS_AUTH_URL,
+                               username=OS_USERNAME,
+                               user_domain_name=OS_USER_DOMAIN_NAME,
+                               password=OS_PASSWORD,
+                               project_name=OS_PROJECT_NAME,
+                               project_domain_name=OS_PROJECT_DOMAIN_NAME)
+
+            self._session = ksc_session.Session(auth=auth)
+
+        return self._session
+
+    def get_parser(self):
+        return argparse.ArgumentParser(description=self.description)
+
+    @property
+    def args(self):
+        if not self._args:
+            self._args = self.get_parser().parse_args()
+
+        return self._args
+
+    @property
+    def plan(self):
+        if not self._plan:
+            self._plan = Plan('scope')
+            for host in ['ipa', 'openstack']:
+                self._plan.add_host(host)
+
+        return self._plan
+
+    def build_work_item_list(self, items):
+        return WorkItemList(items, self.session, self.plan)
+
 
 if __name__ == '__main__':
     main()
