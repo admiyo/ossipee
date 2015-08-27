@@ -144,16 +144,6 @@ class Plan(object):
         self.hosts[name] = self._get_client_vars()
 
 
-def create_plan(section='scope'):
-    plan = Plan(section)
-    for host in ['ipa', 'openstack']:
-        plan.add_host(host)
-    return plan
-
-
-plan = create_plan()
-
-
 class WorkItem(object):
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
@@ -682,102 +672,9 @@ def PrivateNetworkList(session, plan):
     return WorkItemList(
         [PrivateNetwork, PrivateSubNet], session, plan)
 
-components = dict()
-_auth = None
-_session = None
-
-
-def _create_auth():
-    OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
-    OS_USERNAME = os.environ.get('OS_USERNAME')
-    OS_PASSWORD = os.environ.get('OS_PASSWORD')
-    OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
-    OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
-    OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
-
-    if OS_AUTH_URL is None:
-        logging.error('OS_AUTH_URL not set.  Aborting.')
-        sys.exit(-1)
-
-    auth = v3.Password(auth_url=OS_AUTH_URL,
-                       username=OS_USERNAME,
-                       user_domain_name=OS_USER_DOMAIN_NAME,
-                       password=OS_PASSWORD,
-                       project_name=OS_PROJECT_NAME,
-                       project_domain_name=OS_PROJECT_DOMAIN_NAME)
-
-    return auth
-
-
-def get_auth():
-    if components.get(v3.Auth) is None:
-        components[v3.Auth] = _create_auth()
-    return components[v3.Auth]
-
-
-def create_session():
-        session = ksc_session.Session(auth=get_auth())
-        return session
-
-
-def build_work_item_list(work_item_factories):
-    session = create_session()
-    return WorkItemList(work_item_factories, session, plan)
-
-
-workers = {
-    'all': build_work_item_list([
-        PrivateNetworkList, PublicNetworkList,
-        AllServers, Inventory]),
-    'servers': build_work_item_list([AllServers, Inventory]),
-    'controller': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'controller'),
-        lambda session, plan: FloatIP(session, plan, 'controller'),
-        Inventory
-    ]),
-    'ipa': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'ipa'),
-        lambda session, plan: FloatIP(session, plan, 'ipa'),
-        Inventory
-    ]),
-    'openstack': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'openstack'),
-        lambda session, plan: FloatIP(session, plan, 'openstack'),
-        Inventory
-    ]),
-    'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
-    'inventory': build_work_item_list([Inventory]),
-    'hosts_entries': build_work_item_list([HostEntries])
-}
-
-
-def get_args():
-    parser = argparse.ArgumentParser(
-        description='Display the state of the system.')
-    parser.add_argument('worker', nargs='?', default='all',
-                        help='Worker to execute, defaults to "all"')
-    args = parser.parse_args()
-    return args
-
 
 def enable_logging():
     logging.basicConfig(level=logging.DEBUG)
-
-
-def create(worker='all'):
-    workers[worker].create()
-
-
-def teardown(worker='all'):
-    workers[worker].teardown()
-
-
-def display(worker='all'):
-    workers[worker].display()
-
-
-def list():
-    logging.info(json.dumps(workers.keys()))
 
 
 def main():
@@ -868,6 +765,56 @@ class Application(object):
 
     def build_work_item_list(self, items):
         return WorkItemList(items, self.session, self.plan)
+
+
+class WorkerApplication(Application):
+
+    description = 'Display the state of the system.'
+
+    worker_class = {
+        'all': [PrivateNetworkList, PublicNetworkList, AllServers, Inventory],
+        'servers': [AllServers, Inventory],
+        'controller': [
+            lambda session, plan: NovaServer(session, plan, 'controller'),
+            lambda session, plan: FloatIP(session, plan, 'controller'),
+            Inventory
+        ],
+        'ipa': [
+            lambda session, plan: NovaServer(session, plan, 'ipa'),
+            lambda session, plan: FloatIP(session, plan, 'ipa'),
+            Inventory
+        ],
+        'openstack': [
+            lambda session, plan: NovaServer(session, plan, 'openstack'),
+            lambda session, plan: FloatIP(session, plan, 'openstack'),
+            Inventory
+        ],
+        'network': [PrivateNetworkList, PublicNetworkList],
+        'inventory': [Inventory],
+        'hosts_entries': [HostEntries]
+    }
+
+    def get_parser(self):
+        parser = super(WorkerApplication, self).get_parser()
+        parser.add_argument('worker', nargs='?', default='all',
+                            help='Worker to execute, defaults to "all"')
+        return parser
+
+    @property
+    def worker(self):
+        return self.args.worker
+
+    def __getitem__(self, item):
+        return self.build_work_item_list(self.worker_class[item])
+
+    def __len__(self):
+        return len(self.worker_class)
+
+    def __iter__(self):
+        return iter(self.worker_class)
+
+    def __getattr__(self, attr):
+        return getattr(self[self.worker], attr)
 
 
 if __name__ == '__main__':

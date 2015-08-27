@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
+import json
 import logging
 
 import ossipee
 
 logging.basicConfig(level=logging.DEBUG)
-ossipee.list()
+
+logging.info(json.dumps(list(ossipee.WorkerApplication())))
