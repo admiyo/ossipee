@@ -30,14 +30,15 @@ fqdn:  %(fqdn)s
 
 class Configuration(object):
     def _default_config_options(self, config, outfile):
-        config.add_section('scope')
-        config.set('scope', 'profile', 'rhel7')
-        config.set('scope', 'name', self.username)
-        config.set('scope', 'pubkey', self.key)
-        config.set('scope', 'forwarder',  '192.168.52.3')
+        config.add_section(self.section)
+        config.set(self.section, 'profile', 'rhel7')
+        config.set(self.section, 'name', self.username)
+        config.set(self.section, 'pubkey', self.key)
+        config.set(self.section, 'forwarder',  '192.168.52.3')
         config.write(outfile)
 
-    def __init__(self):
+    def __init__(self, section):
+        self.section = section
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
         self.key = self.username + '-pubkey'
@@ -57,16 +58,16 @@ class Configuration(object):
         config = ConfigParser.ConfigParser()
         config.read(self.config_file)
         try:
-            self.profile = config.get('scope', 'profile')
-            self.name = config.get('scope', 'name')
-            self.key = config.get('scope', 'pubkey')
-            self.forwarder = config.get('scope', 'forwarder')
+            self.profile = config.get(self.section, 'profile')
+            self.name = config.get(self.section, 'name')
+            self.key = config.get(self.section, 'pubkey')
+            self.forwarder = config.get(self.section, 'forwarder')
             self.security_groups = ['default']
 
         except ConfigParser.NoSectionError:
             self._default_config_options(config, f)
-            logging.error('No Scope Section in %s, wrote defaults' %
-                          self.config_file)
+            logging.error('No %s Section in %s, wrote defaults' %
+                          (self.section, self.config_file))
             exit(1)
 
 profiles = {
@@ -94,8 +95,8 @@ profiles = {
 
 
 class Plan(object):
-    def __init__(self):
-        self.configuration = Configuration()
+    def __init__(self, section):
+        self.configuration = Configuration(section)
 
         name = self.configuration.name
         self.name = self.configuration.name
@@ -143,8 +144,8 @@ class Plan(object):
         self.hosts[name] = self._get_client_vars()
 
 
-def create_plan():
-    plan = Plan()
+def create_plan(section='scope'):
+    plan = Plan(section)
     for host in ['ipa', 'openstack']:
         plan.add_host(host)
     return plan
