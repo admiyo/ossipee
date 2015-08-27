@@ -468,7 +468,7 @@ class NovaServer(WorkItem):
 class HostEntries(WorkItem):
     def __init__(self, session, plan):
         super(HostEntries, self).__init__(session, plan, 'hosts')
-        self.host_file='/etc/hosts'
+        self.host_file = '/etc/hosts'
 
     def fetch_float_ip_from_server(self, server_name):
         server = self.get_server_by_name(self.make_fqdn(server_name))
@@ -479,19 +479,22 @@ class HostEntries(WorkItem):
     def create(self):
         self.teardown()
         for host in self.plan.hosts:
-            ip =  self.fetch_float_ip_from_server(host)
-            command = "$ a %s %s.%s" % (ip, host,self.plan.domain_name)
+            ip = self.fetch_float_ip_from_server(host)
+            command = "$ a %s %s.%s" % (ip, host, self.plan.domain_name)
             process = subprocess.Popen(
                 ['sudo', 'sed', '-i', command, self.host_file],
 
-                stdout=subprocess.PIPE )
+                stdout=subprocess.PIPE)
             out, err = process.communicate()
         self.display()
 
     def display(self):
-        process = subprocess.Popen(
-            ['sudo', 'grep', '-e', "%s$" % self.plan.domain_name, self.host_file],
-            stdout=subprocess.PIPE )
+        process = subprocess.Popen(['sudo',
+                                    'grep',
+                                    '-e',
+                                    "%s$" % self.plan.domain_name,
+                                    self.host_file],
+                                   stdout=subprocess.PIPE)
         out, err = process.communicate()
         print(out)
 
@@ -500,10 +503,10 @@ class HostEntries(WorkItem):
 
         process = subprocess.Popen(
             ['sudo', 'sed', '-i', command, self.host_file],
-
-            stdout=subprocess.PIPE )
+            stdout=subprocess.PIPE)
         out, err = process.communicate()
         self.display()
+
 
 class AllServers(WorkItem):
     def __init__(self, session, plan):
