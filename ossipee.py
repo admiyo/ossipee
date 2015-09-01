@@ -11,8 +11,8 @@ import time
 
 import ConfigParser
 
+from keystoneclient import auth as ksc_auth
 from keystoneclient import session as ksc_session
-from keystoneclient.auth.identity import v3
 from keystoneclient.openstack.common.apiclient import exceptions
 from keystoneclient.v3 import client as keystone_v3
 from neutronclient.neutron import client as neutronclient
@@ -725,30 +725,20 @@ class Application(object):
     @property
     def session(self):
         if not self._session:
-            OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
-            OS_USERNAME = os.environ.get('OS_USERNAME')
-            OS_PASSWORD = os.environ.get('OS_PASSWORD')
-            OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
-            OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
-            OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
-
-            if OS_AUTH_URL is None:
-                logging.error('OS_AUTH_URL not set.  Aborting.')
-                sys.exit(-1)
-
-            auth = v3.Password(auth_url=OS_AUTH_URL,
-                               username=OS_USERNAME,
-                               user_domain_name=OS_USER_DOMAIN_NAME,
-                               password=OS_PASSWORD,
-                               project_name=OS_PROJECT_NAME,
-                               project_domain_name=OS_PROJECT_DOMAIN_NAME)
-
-            self._session = ksc_session.Session(auth=auth)
+            auth_plugin = ksc_auth.load_from_argparse_arguments(self.args)
+            self._session = ksc_session.Session.load_from_cli_options(
+                self.args,
+                auth=auth_plugin)
 
         return self._session
 
     def get_parser(self):
-        return argparse.ArgumentParser(description=self.description)
+        parser = argparse.ArgumentParser(description=self.description)
+        ksc_session.Session.register_cli_options(parser)
+        ksc_auth.register_argparse_arguments(parser,
+                                             sys.argv,
+                                             default='v3password')
+        return parser
 
     @property
     def args(self):
