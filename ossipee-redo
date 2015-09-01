@@ -6,5 +6,6 @@ import ossipee
 
 logging.basicConfig(level=logging.INFO)
 
-ossipee.teardown(ossipee.get_args().worker)
-ossipee.create(ossipee.get_args().worker)
+app = ossipee.WorkerApplication()
+app.teardown()
+app.create()

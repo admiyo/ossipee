@@ -30,14 +30,15 @@ fqdn:  %(fqdn)s
 
 class Configuration(object):
     def _default_config_options(self, config, outfile):
-        config.add_section('scope')
-        config.set('scope', 'profile', 'rhel7')
-        config.set('scope', 'name', self.username)
-        config.set('scope', 'pubkey', self.key)
-        config.set('scope', 'forwarder',  '192.168.52.3')
+        config.add_section(self.section)
+        config.set(self.section, 'profile', 'rhel7')
+        config.set(self.section, 'name', self.username)
+        config.set(self.section, 'pubkey', self.key)
+        config.set(self.section, 'forwarder',  '192.168.52.3')
         config.write(outfile)
 
-    def __init__(self):
+    def __init__(self, section):
+        self.section = section
         self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
         self.username = os.environ.get('USER', 'rdo')
         self.key = self.username + '-pubkey'
@@ -57,16 +58,16 @@ class Configuration(object):
         config = ConfigParser.ConfigParser()
         config.read(self.config_file)
         try:
-            self.profile = config.get('scope', 'profile')
-            self.name = config.get('scope', 'name')
-            self.key = config.get('scope', 'pubkey')
-            self.forwarder = config.get('scope', 'forwarder')
+            self.profile = config.get(self.section, 'profile')
+            self.name = config.get(self.section, 'name')
+            self.key = config.get(self.section, 'pubkey')
+            self.forwarder = config.get(self.section, 'forwarder')
             self.security_groups = ['default']
 
         except ConfigParser.NoSectionError:
             self._default_config_options(config, f)
-            logging.error('No Scope Section in %s, wrote defaults' %
-                          self.config_file)
+            logging.error('No %s Section in %s, wrote defaults' %
+                          (self.section, self.config_file))
             exit(1)
 
 profiles = {
@@ -94,8 +95,8 @@ profiles = {
 
 
 class Plan(object):
-    def __init__(self):
-        self.configuration = Configuration()
+    def __init__(self, section):
+        self.configuration = Configuration(section)
 
         name = self.configuration.name
         self.name = self.configuration.name
@@ -141,16 +142,6 @@ class Plan(object):
             print ('host %s already exists.' % name)
             return
         self.hosts[name] = self._get_client_vars()
-
-
-def create_plan():
-    plan = Plan()
-    for host in ['ipa', 'openstack']:
-        plan.add_host(host)
-    return plan
-
-
-plan = create_plan()
 
 
 class WorkItem(object):
@@ -477,7 +468,7 @@ class NovaServer(WorkItem):
 class HostEntries(WorkItem):
     def __init__(self, session, plan):
         super(HostEntries, self).__init__(session, plan, 'hosts')
-        self.host_file='/etc/hosts'
+        self.host_file = '/etc/hosts'
 
     def fetch_float_ip_from_server(self, server_name):
         server = self.get_server_by_name(self.make_fqdn(server_name))
@@ -488,19 +479,22 @@ class HostEntries(WorkItem):
     def create(self):
         self.teardown()
         for host in self.plan.hosts:
-            ip =  self.fetch_float_ip_from_server(host)
-            command = "$ a %s %s.%s" % (ip, host,self.plan.domain_name)
+            ip = self.fetch_float_ip_from_server(host)
+            command = "$ a %s %s.%s" % (ip, host, self.plan.domain_name)
             process = subprocess.Popen(
                 ['sudo', 'sed', '-i', command, self.host_file],
 
-                stdout=subprocess.PIPE )
+                stdout=subprocess.PIPE)
             out, err = process.communicate()
         self.display()
 
     def display(self):
-        process = subprocess.Popen(
-            ['sudo', 'grep', '-e', "%s$" % self.plan.domain_name, self.host_file],
-            stdout=subprocess.PIPE )
+        process = subprocess.Popen(['sudo',
+                                    'grep',
+                                    '-e',
+                                    "%s$" % self.plan.domain_name,
+                                    self.host_file],
+                                   stdout=subprocess.PIPE)
         out, err = process.communicate()
         print(out)
 
@@ -509,10 +503,10 @@ class HostEntries(WorkItem):
 
         process = subprocess.Popen(
             ['sudo', 'sed', '-i', command, self.host_file],
-
-            stdout=subprocess.PIPE )
+            stdout=subprocess.PIPE)
         out, err = process.communicate()
         self.display()
+
 
 class AllServers(WorkItem):
     def __init__(self, session, plan):
@@ -681,111 +675,9 @@ def PrivateNetworkList(session, plan):
     return WorkItemList(
         [PrivateNetwork, PrivateSubNet], session, plan)
 
-components = dict()
-_auth = None
-_session = None
-
-
-def _create_auth():
-    OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
-    OS_USERNAME = os.environ.get('OS_USERNAME')
-    OS_PASSWORD = os.environ.get('OS_PASSWORD')
-    OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
-    OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
-    OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
-
-    if OS_AUTH_URL is None:
-        logging.error('OS_AUTH_URL not set.  Aborting.')
-        sys.exit(-1)
-
-    auth = v3.Password(auth_url=OS_AUTH_URL,
-                       username=OS_USERNAME,
-                       user_domain_name=OS_USER_DOMAIN_NAME,
-                       password=OS_PASSWORD,
-                       project_name=OS_PROJECT_NAME,
-                       project_domain_name=OS_PROJECT_DOMAIN_NAME)
-
-    return auth
-
-
-def get_auth():
-    if components.get(v3.Auth) is None:
-        components[v3.Auth] = _create_auth()
-    return components[v3.Auth]
-
-
-def create_session():
-        session = ksc_session.Session(auth=get_auth())
-        return session
-
-
-def build_work_item_list(work_item_factories):
-    session = create_session()
-    return WorkItemList(work_item_factories, session, plan)
-
-
-workers = {
-    'all': build_work_item_list([
-        PrivateNetworkList, PublicNetworkList,
-        AllServers, Inventory]),
-    'servers': build_work_item_list([AllServers, Inventory]),
-    'controller': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'controller'),
-        lambda session, plan: FloatIP(session, plan, 'controller'),
-        Inventory
-    ]),
-    'ipa': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'ipa'),
-        lambda session, plan: FloatIP(session, plan, 'ipa'),
-        Inventory
-    ]),
-    'openstack': build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, 'openstack'),
-        lambda session, plan: FloatIP(session, plan, 'openstack'),
-        Inventory
-    ]),
-    'network': build_work_item_list([PrivateNetworkList, PublicNetworkList]),
-    'inventory': build_work_item_list([Inventory]),
-    'hosts_entries': build_work_item_list([HostEntries])
-}
-
-
-def get_args():
-    parser = argparse.ArgumentParser(
-        description='Display the state of the system.')
-    parser.add_argument('worker', nargs='?', default='all',
-                        help='Worker to execute, defaults to "all"')
-    args = parser.parse_args()
-    return args
-
 
 def enable_logging():
     logging.basicConfig(level=logging.DEBUG)
-
-
-def create(worker='all'):
-    workers[worker].create()
-
-
-def create_host(hostname):
-    plan.add_host(hostname)
-    worker = build_work_item_list([
-        lambda session, plan: NovaServer(session, plan, hostname),
-        lambda session, plan: FloatIP(session, plan, hostname),
-        Inventory
-    ]).create()
-
-
-def teardown(worker='all'):
-    workers[worker].teardown()
-
-
-def display(worker='all'):
-    workers[worker].display()
-
-
-def list():
-    logging.info(json.dumps(workers.keys()))
 
 
 def main():
@@ -816,6 +708,117 @@ def main():
         'success': True,
         'args': args_data
     })
+
+
+class Application(object):
+
+    description = ''
+
+    def __init__(self, description=None):
+        self._session = None
+        self._args = None
+        self._plan = None
+
+        if description:
+            self.description = description
+
+    @property
+    def session(self):
+        if not self._session:
+            OS_AUTH_URL = os.environ.get('OS_AUTH_URL')
+            OS_USERNAME = os.environ.get('OS_USERNAME')
+            OS_PASSWORD = os.environ.get('OS_PASSWORD')
+            OS_USER_DOMAIN_NAME = os.environ.get('OS_USER_DOMAIN_NAME')
+            OS_PROJECT_DOMAIN_NAME = os.environ.get('OS_PROJECT_DOMAIN_NAME')
+            OS_PROJECT_NAME = os.environ.get('OS_PROJECT_NAME')
+
+            if OS_AUTH_URL is None:
+                logging.error('OS_AUTH_URL not set.  Aborting.')
+                sys.exit(-1)
+
+            auth = v3.Password(auth_url=OS_AUTH_URL,
+                               username=OS_USERNAME,
+                               user_domain_name=OS_USER_DOMAIN_NAME,
+                               password=OS_PASSWORD,
+                               project_name=OS_PROJECT_NAME,
+                               project_domain_name=OS_PROJECT_DOMAIN_NAME)
+
+            self._session = ksc_session.Session(auth=auth)
+
+        return self._session
+
+    def get_parser(self):
+        return argparse.ArgumentParser(description=self.description)
+
+    @property
+    def args(self):
+        if not self._args:
+            self._args = self.get_parser().parse_args()
+
+        return self._args
+
+    @property
+    def plan(self):
+        if not self._plan:
+            self._plan = Plan('scope')
+            for host in ['ipa', 'openstack']:
+                self._plan.add_host(host)
+
+        return self._plan
+
+    def build_work_item_list(self, items):
+        return WorkItemList(items, self.session, self.plan)
+
+
+class WorkerApplication(Application):
+
+    description = 'Display the state of the system.'
+
+    worker_class = {
+        'all': [PrivateNetworkList, PublicNetworkList, AllServers, Inventory],
+        'servers': [AllServers, Inventory],
+        'controller': [
+            lambda session, plan: NovaServer(session, plan, 'controller'),
+            lambda session, plan: FloatIP(session, plan, 'controller'),
+            Inventory
+        ],
+        'ipa': [
+            lambda session, plan: NovaServer(session, plan, 'ipa'),
+            lambda session, plan: FloatIP(session, plan, 'ipa'),
+            Inventory
+        ],
+        'openstack': [
+            lambda session, plan: NovaServer(session, plan, 'openstack'),
+            lambda session, plan: FloatIP(session, plan, 'openstack'),
+            Inventory
+        ],
+        'network': [PrivateNetworkList, PublicNetworkList],
+        'inventory': [Inventory],
+        'hosts_entries': [HostEntries]
+    }
+
+    def get_parser(self):
+        parser = super(WorkerApplication, self).get_parser()
+        parser.add_argument('worker', nargs='?', default='all',
+                            help='Worker to execute, defaults to "all"')
+        return parser
+
+    @property
+    def worker(self):
+        return self.args.worker
+
+    def __getitem__(self, item):
+        return self.build_work_item_list(self.worker_class[item])
+
+    def __len__(self):
+        return len(self.worker_class)
+
+    def __iter__(self):
+        return iter(self.worker_class)
+
+    def __getattr__(self, attr):
+        return getattr(self[self.worker], attr)
+
 
 if __name__ == '__main__':
     main()
