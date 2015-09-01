@@ -726,6 +726,13 @@ class Application(object):
     def session(self):
         if not self._session:
             auth_plugin = ksc_auth.load_from_argparse_arguments(self.args)
+            try:
+                if not auth_plugin.auth_url:
+                    logging.error('OS_AUTH_URL not set.  Aborting.')
+                    sys.exit(-1)
+            except AttributeError:
+                pass
+            
             self._session = ksc_session.Session.load_from_cli_options(
                 self.args,
                 auth=auth_plugin)
