@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shlex
+import six
 import subprocess
 import sys
 import time
@@ -29,81 +30,143 @@ fqdn:  %(fqdn)s
 
 
 class Configuration(object):
-    def _default_config_options(self, config, outfile):
-        config.add_section(self.section)
-        config.set(self.section, 'profile', 'rhel7')
-        config.set(self.section, 'name', self.username)
-        config.set(self.section, 'pubkey', self.key)
-        config.set(self.section, 'forwarder',  '192.168.52.3')
-        config.write(outfile)
+
+    config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
+    config_file = config_dir + "/config.ini"
+    profile_file = config_dir + "/profiles.ini"
+
+    default_profiles = {
+        'centos7': {
+            'cloud_user': 'centos',
+            'image': 'centos-7-cloud',
+            'flavor': 'm1.medium',
+        },
+        'rhel7': {
+            'cloud_user': 'cloud-user',
+            'image': 'rhel-guest-image-7.1-20150224.0',
+            'flavor': 'm1.medium',
+        },
+        'rhel6': {
+            'cloud_user': 'cloud-user',
+            'image': 'rhel-6.6-latest',
+            'flavor': 'm1.medium',
+        },
+        'f22': {
+            'cloud_user': 'fedora',
+            'image': 'Fedora 22 Cloud Image',
+            'flavor': 'm1.medium',
+        }
+    }
+
+    PROFILE_VARS = ['cloud_user', 'image', 'flavor']
+
+    def _default_config_options(self):
+        self.config.add_section(self.section)
+        self.config.set(self.section, 'profile', self.profile)
+        self.config.set(self.section, 'name', self.name)
+        self.config.set(self.section, 'pubkey', self.key)
+        self.config.set(self.section, 'forwarder',  self.forwarder)
+
+        logging.warning("Writing new config section %s to %s",
+                        self.section,
+                        self.config_file)
+
+        with open(self.config_file, 'w') as f:
+            self.config.write(f)
+
+    def _default_profile_options(self):
+        for profile, details in six.iteritems(self.default_profiles):
+            self.profiles.add_section(profile)
+            for k, v in six.iteritems(details):
+                self.profiles.set(profile, k, v)
+
+        logging.warn("Wrote profiles file at %s" % self.profile_file)
+
+        with open(self.profile_file, 'w') as f:
+            self.profiles.write(f)
 
     def __init__(self, section):
         self.section = section
-        self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
-        self.username = os.environ.get('USER', 'rdo')
-        self.key = self.username + '-pubkey'
+        self.config = ConfigParser.SafeConfigParser()
+        self.profiles = ConfigParser.SafeConfigParser()
+
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
 
-        self.config_file = self.config_dir + "/config.ini"
+        if os.path.exists(self.profile_file):
+            self.profiles.read(self.profile_file)
+        else:
+            self._default_profile_options()
 
         if not os.path.exists(self.config_file):
-            with open(self.config_file, 'w') as f:
-                config = ConfigParser.RawConfigParser()
-                self._default_config_options(config, f)
-                logging.error("No config file %s. wrote default" %
-                              self.config_file)
-                exit(1)
-
-        config = ConfigParser.ConfigParser()
-        config.read(self.config_file)
-        try:
-            self.profile = config.get(self.section, 'profile')
-            self.name = config.get(self.section, 'name')
-            self.key = config.get(self.section, 'pubkey')
-            self.forwarder = config.get(self.section, 'forwarder')
-            self.security_groups = ['default']
-
-        except ConfigParser.NoSectionError:
-            self._default_config_options(config, f)
-            logging.error('No %s Section in %s, wrote defaults' %
-                          (self.section, self.config_file))
+            self._default_config_options()
+            logging.error("Config file created. Please edit this with the "
+                          "appropriate options and then run again.")
             exit(1)
 
-profiles = {
-    'centos7': {
-        'cloud_user': 'centos',
-        'image': 'centos-7-cloud',
-        'flavor': 'm1.medium',
-    },
-    'rhel7': {
-        'cloud_user': 'cloud-user',
-        'image': 'rhel-guest-image-7.1-20150224.0',
-        'flavor': 'm1.medium',
-    },
-    'rhel6': {
-        'cloud_user': 'cloud-user',
-        'image': 'rhel-6.6-latest',
-        'flavor': 'm1.medium',
-    },
-    'f22': {
-        'cloud_user': 'fedora',
-        'image': 'Fedora 22 Cloud Image',
-        'flavor': 'm1.medium',
-    }
-}
+        self.config.read(self.config_file)
+
+        if not self.config.has_section(self.section):
+            self._default_config_options()
+
+        self.security_groups = ['default']
+
+    def get(self, name, default=None):
+        try:
+            return self.config.get(self.section, name)
+        except ConfigParser.NoOptionError:
+            logging.debug("Option %s not in config file, using default: %s",
+                          name,
+                          default)
+
+            return default
+
+    @property
+    def profile(self):
+        profile = self.get('profile', 'rhel7')
+
+        if not self.profiles.has_section(profile):
+            logging.error("Unknown profile type: %s. This is not in your "
+                          "profiles file at %s", profile, self.profile_file)
+            exit(1)
+
+        missing = [v for v in self.PROFILE_VARS
+                   if not self.profiles.has_option(profile, v)]
+
+        if missing:
+            logging.error("Missing parameters %s in profile %s definition in "
+                          "%s. It must contain at least %s",
+                          ", ".join(missing),
+                          profile,
+                          self.profile_file,
+                          ", ".join(self.PROFILE_VARS))
+            exit(1)
+
+        return dict(self.profiles.items(profile))
+
+    @property
+    def name(self):
+        return self.get('name', os.environ.get('USER', 'rdo'))
+
+    @property
+    def key(self):
+        return self.get('pubkey', self.name + '-pubkey')
+
+    @property
+    def forwarder(self):
+        return self.get('forwarder', '192.168.52.3')
 
 
 class Plan(object):
-    def __init__(self, section):
-        self.configuration = Configuration(section)
+    def __init__(self, configuration):
+        self.configuration = configuration
 
         name = self.configuration.name
         self.name = self.configuration.name
         self.forwarder = self.configuration.forwarder
         self.security_groups = self.configuration.security_groups
         self.key = self.configuration.key
-        self.profile = profiles[self.configuration.profile]
+        self.profile = self.configuration.profile
 
         self.domain_name = name + '.test'
         self.inventory_dir = self.configuration.config_dir + '/inventory/'
@@ -719,6 +782,7 @@ class Application(object):
         self._session = None
         self._args = None
         self._plan = None
+        self._configuration = None
 
         if description:
             self.description = description
@@ -746,6 +810,9 @@ class Application(object):
         ksc_auth.register_argparse_arguments(parser,
                                              sys.argv,
                                              default='v3password')
+        parser.add_argument('-s', '--section',
+                            dest='section',
+                            default='scope')
         return parser
 
     @property
@@ -756,9 +823,16 @@ class Application(object):
         return self._args
 
     @property
+    def configuration(self):
+        if not self._configuration:
+            self._configuration = Configuration(self.args.section)
+
+        return self._configuration
+
+    @property
     def plan(self):
         if not self._plan:
-            self._plan = Plan('scope')
+            self._plan = Plan(self.configuration)
             for host in ['ipa', 'openstack']:
                 self._plan.add_host(host)
 
@@ -814,8 +888,14 @@ class WorkerApplication(Application):
     def __iter__(self):
         return iter(self.worker_class)
 
-    def __getattr__(self, attr):
-        return getattr(self[self.worker], attr)
+    def create(self, *args, **kwargs):
+        return self[self.worker].create(*args, **kwargs)
+
+    def teardown(self, *args, **kwargs):
+        return self[self.worker].teardown(*args, **kwargs)
+
+    def display(self, *args, **kwargs):
+        return self[self.worker].display(*args, **kwargs)
 
 
 if __name__ == '__main__':
