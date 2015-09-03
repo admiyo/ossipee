@@ -339,7 +339,6 @@ class FloatIP(WorkItem):
                 break
 
     def reset_ssh(self, ip_address):
-        subprocess.call(['ssh-keygen', '-R', ip_address])
         attempts = 5
         while(attempts):
             try:
@@ -367,6 +366,8 @@ class FloatIP(WorkItem):
         fqdn = self.make_fqdn(self.name)
         server = self.get_server_by_name(fqdn)
         ip_address = self.assign_next_ip(server)
+        subprocess.call(['ssh-keygen', '-R', fqdn])
+        subprocess.call(['ssh-keygen', '-R', ip_address])
         self.reset_ssh(ip_address)
 
     def display(self):
@@ -732,7 +733,7 @@ class Application(object):
                     sys.exit(-1)
             except AttributeError:
                 pass
-            
+
             self._session = ksc_session.Session.load_from_cli_options(
                 self.args,
                 auth=auth_plugin)
