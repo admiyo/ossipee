@@ -887,8 +887,14 @@ class WorkerApplication(Application):
     def __iter__(self):
         return iter(self.worker_class)
 
-    def __getattr__(self, attr):
-        return getattr(self[self.worker], attr)
+    def create(self, *args, **kwargs):
+        return self[self.worker].create(*args, **kwargs)
+
+    def teardown(self, *args, **kwargs):
+        return self[self.worker].teardown(*args, **kwargs)
+
+    def display(self, *args, **kwargs):
+        return self[self.worker].display(*args, **kwargs)
 
 
 if __name__ == '__main__':
