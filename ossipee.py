@@ -29,46 +29,72 @@ fqdn:  %(fqdn)s
 
 
 class Configuration(object):
-    def _default_config_options(self, config, outfile):
-        config.add_section(self.section)
-        config.set(self.section, 'profile', 'rhel7')
-        config.set(self.section, 'name', self.username)
-        config.set(self.section, 'pubkey', self.key)
-        config.set(self.section, 'forwarder',  '192.168.52.3')
-        config.write(outfile)
+
+    config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
+    config_file = config_dir + "/config.ini"
+
+    def _default_config_options(self):
+        self.config.add_section(self.section)
+        self.config.set(self.section, 'profile', self.profile)
+        self.config.set(self.section, 'name', self.name)
+        self.config.set(self.section, 'pubkey', self.key)
+        self.config.set(self.section, 'forwarder',  self.forwarder)
+        self.update_config()
 
     def __init__(self, section):
         self.section = section
-        self.config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
-        self.username = os.environ.get('USER', 'rdo')
-        self.key = self.username + '-pubkey'
+        self.config = ConfigParser.SafeConfigParser()
+
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
 
-        self.config_file = self.config_dir + "/config.ini"
-
         if not os.path.exists(self.config_file):
-            with open(self.config_file, 'w') as f:
-                config = ConfigParser.RawConfigParser()
-                self._default_config_options(config, f)
-                logging.error("No config file %s. wrote default" %
-                              self.config_file)
-                exit(1)
-
-        config = ConfigParser.ConfigParser()
-        config.read(self.config_file)
-        try:
-            self.profile = config.get(self.section, 'profile')
-            self.name = config.get(self.section, 'name')
-            self.key = config.get(self.section, 'pubkey')
-            self.forwarder = config.get(self.section, 'forwarder')
-            self.security_groups = ['default']
-
-        except ConfigParser.NoSectionError:
-            self._default_config_options(config, f)
-            logging.error('No %s Section in %s, wrote defaults' %
-                          (self.section, self.config_file))
+            self._default_config_options()
+            logging.error("Config file created. Please edit this with the "
+                          "appropriate options and then run again.")
             exit(1)
+
+        self.config.read(self.config_file)
+
+        if not self.config.has_section(self.section):
+            self._default_config_options()
+
+        self.security_groups = ['default']
+
+    def update_config(self):
+        logging.warning("Writing new config section %s to %s",
+                        self.section,
+                        self.config_file)
+
+        with open(self.config_file, 'w') as f:
+            self.config.write(f)
+
+    def get(self, name, default=None):
+        try:
+            return self.config.get(self.section, name)
+        except ConfigParser.NoOptionError:
+            logging.debug("Option %s not in config file, using default: %s",
+                          name,
+                          default)
+
+            return default
+
+    @property
+    def profile(self):
+        return self.get('profile', 'rhel7')
+
+    @property
+    def name(self):
+        return self.get('name', os.environ.get('USER', 'rdo'))
+
+    @property
+    def key(self):
+        return self.get('pubkey', self.name + '-pubkey')
+
+    @property
+    def forwarder(self):
+        return self.get('forwarder', '192.168.52.3')
+
 
 profiles = {
     'centos7': {
@@ -95,8 +121,8 @@ profiles = {
 
 
 class Plan(object):
-    def __init__(self, section):
-        self.configuration = Configuration(section)
+    def __init__(self, configuration):
+        self.configuration = configuration
 
         name = self.configuration.name
         self.name = self.configuration.name
@@ -718,6 +744,7 @@ class Application(object):
         self._session = None
         self._args = None
         self._plan = None
+        self._configuration = None
 
         if description:
             self.description = description
@@ -732,7 +759,7 @@ class Application(object):
                     sys.exit(-1)
             except AttributeError:
                 pass
-            
+
             self._session = ksc_session.Session.load_from_cli_options(
                 self.args,
                 auth=auth_plugin)
@@ -745,6 +772,9 @@ class Application(object):
         ksc_auth.register_argparse_arguments(parser,
                                              sys.argv,
                                              default='v3password')
+        parser.add_argument('-s', '--section',
+                            dest='section',
+                            default='scope')
         return parser
 
     @property
@@ -755,9 +785,16 @@ class Application(object):
         return self._args
 
     @property
+    def configuration(self):
+        if not self._configuration:
+            self._configuration = Configuration(self.args.section)
+
+        return self._configuration
+
+    @property
     def plan(self):
         if not self._plan:
-            self._plan = Plan('scope')
+            self._plan = Plan(self.configuration)
             for host in ['ipa', 'openstack']:
                 self._plan.add_host(host)
 
