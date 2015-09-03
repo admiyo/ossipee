@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shlex
+import six
 import subprocess
 import sys
 import time
@@ -32,6 +33,32 @@ class Configuration(object):
 
     config_dir = os.environ.get('HOME', '/tmp') + "/.ossipee"
     config_file = config_dir + "/config.ini"
+    profile_file = config_dir + "/profiles.ini"
+
+    default_profiles = {
+        'centos7': {
+            'cloud_user': 'centos',
+            'image': 'centos-7-cloud',
+            'flavor': 'm1.medium',
+        },
+        'rhel7': {
+            'cloud_user': 'cloud-user',
+            'image': 'rhel-guest-image-7.1-20150224.0',
+            'flavor': 'm1.medium',
+        },
+        'rhel6': {
+            'cloud_user': 'cloud-user',
+            'image': 'rhel-6.6-latest',
+            'flavor': 'm1.medium',
+        },
+        'f22': {
+            'cloud_user': 'fedora',
+            'image': 'Fedora 22 Cloud Image',
+            'flavor': 'm1.medium',
+        }
+    }
+
+    PROFILE_VARS = ['cloud_user', 'image', 'flavor']
 
     def _default_config_options(self):
         self.config.add_section(self.section)
@@ -39,14 +66,37 @@ class Configuration(object):
         self.config.set(self.section, 'name', self.name)
         self.config.set(self.section, 'pubkey', self.key)
         self.config.set(self.section, 'forwarder',  self.forwarder)
-        self.update_config()
+
+        logging.warning("Writing new config section %s to %s",
+                        self.section,
+                        self.config_file)
+
+        with open(self.config_file, 'w') as f:
+            self.config.write(f)
+
+    def _default_profile_options(self):
+        for profile, details in six.iteritems(self.default_profiles):
+            self.profiles.add_section(profile)
+            for k, v in six.iteritems(details):
+                self.profiles.set(profile, k, v)
+
+        logging.warn("Wrote profiles file at %s" % self.profile_file)
+
+        with open(self.profile_file, 'w') as f:
+            self.profiles.write(f)
 
     def __init__(self, section):
         self.section = section
         self.config = ConfigParser.SafeConfigParser()
+        self.profiles = ConfigParser.SafeConfigParser()
 
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
+
+        if os.path.exists(self.profile_file):
+            self.profiles.read(self.profile_file)
+        else:
+            self._default_profile_options()
 
         if not os.path.exists(self.config_file):
             self._default_config_options()
@@ -61,14 +111,6 @@ class Configuration(object):
 
         self.security_groups = ['default']
 
-    def update_config(self):
-        logging.warning("Writing new config section %s to %s",
-                        self.section,
-                        self.config_file)
-
-        with open(self.config_file, 'w') as f:
-            self.config.write(f)
-
     def get(self, name, default=None):
         try:
             return self.config.get(self.section, name)
@@ -81,7 +123,26 @@ class Configuration(object):
 
     @property
     def profile(self):
-        return self.get('profile', 'rhel7')
+        profile = self.get('profile', 'rhel7')
+
+        if not self.profiles.has_section(profile):
+            logging.error("Unknown profile type: %s. This is not in your "
+                          "profiles file at %s", profile, self.profile_file)
+            exit(1)
+
+        missing = [v for v in self.PROFILE_VARS
+                   if not self.profiles.has_option(profile, v)]
+
+        if missing:
+            logging.error("Missing parameters %s in profile %s definition in "
+                          "%s. It must contain at least %s",
+                          ", ".join(missing),
+                          profile,
+                          self.profile_file,
+                          ", ".join(self.PROFILE_VARS))
+            exit(1)
+
+        return dict(self.profiles.items(profile))
 
     @property
     def name(self):
@@ -96,30 +157,6 @@ class Configuration(object):
         return self.get('forwarder', '192.168.52.3')
 
 
-profiles = {
-    'centos7': {
-        'cloud_user': 'centos',
-        'image': 'centos-7-cloud',
-        'flavor': 'm1.medium',
-    },
-    'rhel7': {
-        'cloud_user': 'cloud-user',
-        'image': 'rhel-guest-image-7.1-20150224.0',
-        'flavor': 'm1.medium',
-    },
-    'rhel6': {
-        'cloud_user': 'cloud-user',
-        'image': 'rhel-6.6-latest',
-        'flavor': 'm1.medium',
-    },
-    'f22': {
-        'cloud_user': 'fedora',
-        'image': 'Fedora 22 Cloud Image',
-        'flavor': 'm1.medium',
-    }
-}
-
-
 class Plan(object):
     def __init__(self, configuration):
         self.configuration = configuration
@@ -129,7 +166,7 @@ class Plan(object):
         self.forwarder = self.configuration.forwarder
         self.security_groups = self.configuration.security_groups
         self.key = self.configuration.key
-        self.profile = profiles[self.configuration.profile]
+        self.profile = self.configuration.profile
 
         self.domain_name = name + '.test'
         self.inventory_dir = self.configuration.config_dir + '/inventory/'
