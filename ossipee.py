@@ -13,6 +13,7 @@ import time
 import ConfigParser
 
 from keystoneclient import auth as ksc_auth
+from keystoneclient.openstack.common.apiclient import exceptions as kcexceptions
 from keystoneclient import session as ksc_session
 from keystoneclient.openstack.common.apiclient import exceptions
 from keystoneclient.v3 import client as keystone_v3
@@ -46,6 +47,12 @@ class Configuration(object):
             'image': 'rhel-guest-image-7.1-20150224.0',
             'flavor': 'm1.medium',
         },
+        'os1rhel7': {
+            'cloud_user': 'cloud-user',
+            'image': '_OS1_rhel-guest-image-7.1-20150224.0.x86_64.qcow2',
+            'flavor': 'm1.medium',
+        },
+
         'rhel6': {
             'cloud_user': 'cloud-user',
             'image': 'rhel-6.6-latest',
@@ -57,7 +64,7 @@ class Configuration(object):
             'flavor': 'm1.medium',
         }
     }
-
+    
     PROFILE_VARS = ['cloud_user', 'image', 'flavor']
 
     def _default_config_options(self):
@@ -251,6 +258,16 @@ class WorkItem(object):
             if float.instance_id == server.id:
                 return (float.ip)
 
+    def calculate_address_for_server(self, server):
+        ip_address = None
+        for _, address in server.addresses.iteritems():
+            for interface in address:
+                if interface.get('OS-EXT-IPS:type','') == 'floating':
+                    ip_address =  interface.get('addr')
+        return ip_address        
+
+
+            
     def __init__(self, session, plan, name):
         self.name = name
         self.keystone = keystone_v3.Client(session=session)
@@ -388,6 +405,10 @@ class FloatIP(WorkItem):
             logging.info('IP assign failed. Waiting 5 seconds to try again.')
             time.sleep(5)
             server.add_floating_ip(float.ip)
+        except AttributeError:
+            #if floating IPs are auto assigned, there will
+            #be none listed
+            return None            
         return float.ip
 
     def display_ip_for_server(self, server):
@@ -420,7 +441,9 @@ class FloatIP(WorkItem):
                 attempts = attempts - 1
                 time.sleep(5)
 
+                
     def create(self):
+        
         server = self.get_server_by_name(self.make_fqdn(self.name))
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
@@ -429,6 +452,19 @@ class FloatIP(WorkItem):
         fqdn = self.make_fqdn(self.name)
         server = self.get_server_by_name(fqdn)
         ip_address = self.assign_next_ip(server)
+        ip_address = self.calculate_address_for_server(server)
+        attempts = 4
+        while(ip_address is None and attempts):
+            logging.info(
+                'Getting IP address for sever failed.' +
+                '  Waiting 5 seconds to retry.'
+                '  Attempts left = %d', attempts)
+            time.sleep(5)
+            attempts -= 1
+            server = self.get_server_by_name(self.make_fqdn(self.name))
+            ip_address =  self.calculate_address_for_server(server)
+
+                    
         subprocess.call(['ssh-keygen', '-R', fqdn])
         subprocess.call(['ssh-keygen', '-R', ip_address])
         self.reset_ssh(ip_address)
@@ -456,9 +492,13 @@ class NovaServer(WorkItem):
             return
 
         nics = []
-        for net_name in ['public', 'private']:
-            for network in self._networks_response(net_name)['networks']:
-                nics.append({'net-id': network['id']})
+        try:
+            for net_name in ['public', 'private']:
+                for network in self._networks_response(net_name)['networks']:
+                    nics.append({'net-id': network['id']})
+        except exceptions.EndpointNotFound:
+            #HACK to get OS1 to work
+            nics.append({'net-id': 'f975ca87-2bff-4230-b6ad-5d9ec93749e1'})
 
         response = self.nova.servers.create(
             self.fqdn(),
@@ -529,16 +569,15 @@ class NovaServer(WorkItem):
             self.nova.servers.delete(server.id)
 
 
-class HostEntries(WorkItem):
+class HostsEntries(WorkItem):
     def __init__(self, session, plan):
-        super(HostEntries, self).__init__(session, plan, 'hosts')
+        super(HostsEntries, self).__init__(session, plan, 'hosts')
         self.host_file = '/etc/hosts'
 
     def fetch_float_ip_from_server(self, server_name):
         server = self.get_server_by_name(self.make_fqdn(server_name))
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                return float.ip
+        ip = self.floating_ip_for_server(server)
+        return ip
 
     def create(self):
         self.teardown()
@@ -633,6 +672,7 @@ class FileWorkItem(WorkItem):
             os.remove(self.file_name)
 
 
+
 class Inventory(FileWorkItem):
 
     def __init__(self, session, plan):
@@ -640,17 +680,26 @@ class Inventory(FileWorkItem):
         self.directory = self.plan.inventory_dir
         self.file_name = self.plan.inventory_file
 
+    def _get_nameserver_address(self, ipa_server):
+        # The nameserver should be the fixed IP on the public network.
+        nameserver = None
+        for _, address in ipa_server.addresses.iteritems():
+            for interface in address:
+                if interface.get('OS-EXT-IPS:type','') == 'floating':
+                    ip_address =  interface.get('addr')
+                    for interface in address:
+                        if interface.get('OS-EXT-IPS:type','') == 'fixed':
+                            nameserver = interface['addr']
+        return nameserver
+        
     def write_contents(self, f):
         ipa_server = self.get_server_by_name(self.make_fqdn('ipa'))
-        for nic in ipa_server.addresses[self.plan.name + '-public-net']:
-            if nic['OS-EXT-IPS:type'] == 'fixed':
-                nameserver = nic['addr']
-
+        nameserver = self._get_nameserver_address(ipa_server)
         ipa_clients = []
         for host, vars in self.plan.hosts.iteritems():
             try:
                 server = self.get_server_by_name(self.make_fqdn(host))
-                ip = self.floating_ip_for_server(server)
+                ip = self.calculate_address_for_server(server)
                 f.write('[%s]\n' % host)
                 f.write('%s\n\n' % ip)
                 f.write('[%s:vars]\n' % host)
@@ -738,6 +787,26 @@ def PublicNetworkList(session, plan):
 def PrivateNetworkList(session, plan):
     return WorkItemList(
         [PrivateNetwork, PrivateSubNet], session, plan)
+
+
+class AllNetworks(WorkItem):
+    def __init__(self, session, plan):
+        super(AllServers, self).__init__(session, plan, 'AllServers')
+        self.public = PublicNetworkList(session, plan)
+        self.private =  PrivateNetworkList(session, plan)
+    def create(self):
+        self.servers.create()
+        self.float_ips.create()
+
+    def display(self):
+        self.servers.display()
+        self.float_ips.display()
+
+    def teardown(self):
+        for server in self.list_servers():
+            self.nova.servers.delete(server.id)
+
+
 
 
 def enable_logging():
@@ -866,7 +935,7 @@ class WorkerApplication(Application):
         ],
         'network': [PrivateNetworkList, PublicNetworkList],
         'inventory': [Inventory],
-        'hosts_entries': [HostEntries]
+        'hosts_entries': [HostsEntries]
     }
 
     def get_parser(self):
