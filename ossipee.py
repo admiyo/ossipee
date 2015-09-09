@@ -17,6 +17,7 @@ from keystoneclient import session as ksc_session
 from keystoneclient.openstack.common.apiclient import exceptions
 from keystoneclient.v3 import client as keystone_v3
 from neutronclient.neutron import client as neutronclient
+from neutronclient.common import exceptions as neutronclient_exceptions
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
 
@@ -232,8 +233,11 @@ class WorkItem(object):
     def _subnet_name(self):
         return self.plan.name + '-' + self.name + '-subnet'
 
+    def build_network_name(self, key):
+        return self.plan.name + '-' + key + '-net'
+
     def _network_name(self):
-        return self.plan.name + '-' + self.name + '-net'
+        return self.build_network_name(self.name)
 
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
@@ -389,6 +393,8 @@ class RouterInterface(WorkItem):
             self.neutron.add_interface_router(
                 router_id,
                 {'subnet_id': subnet_id})
+        except neutronclient_exceptions.BadRequest:
+            logging.warn('interface_router (probably) already exists')
         except exceptions.BadRequest:
             logging.warn('interface_router (probably) already exists')
 
@@ -519,7 +525,8 @@ class NovaServer(WorkItem):
         nics = []
         try:
             for net_name in self.plan.networks.keys():
-                for network in self._networks_response(net_name)['networks']:
+                for network in self._networks_response(
+                        self.build_network_name(net_name))['networks']:
                     nics.append({'net-id': network['id']})
         except exceptions.EndpointNotFound:
             # HACK to get OS1 to work
