@@ -404,7 +404,8 @@ class RouterInterface(WorkItem):
         try:
             routers = self._router_response(self._router_name())['routers']
             for router in routers:
-                for subnet in self._subnet_response(self._subnet_name())['subnets']:
+                for subnet in self._subnet_response(
+                        self._subnet_name())['subnets']:
                     self.neutron.remove_interface_router(
                         router['id'], {'subnet_id': subnet['id']})
         except Exception:
@@ -767,7 +768,7 @@ class WorkItemList(object):
             self.work_items = [factory(session, plan)
                                for factory in work_items]
         else:
-             self.work_items = work_items
+            self.work_items = work_items
 
     def create(self):
         for item in self.work_items:
@@ -797,6 +798,7 @@ def network_components(session, plan, name):
     work_items = [component(session, plan, name)
                   for component in plan.networks[name]['components']]
     return WorkItemList(work_items, session, plan, False)
+
 
 def all_networks(session, plan):
     return WorkItemList([network_components(session, plan, network)
