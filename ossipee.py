@@ -72,6 +72,8 @@ class Configuration(object):
         self.config.set(self.section, 'name', self.name)
         self.config.set(self.section, 'pubkey', self.key)
         self.config.set(self.section, 'forwarder',  self.forwarder)
+        self.config.set(self.section, 'public_network', self.public_network)
+        self.config.set(self.section, 'private_network', self.private_network)
 
         logging.warning("Writing new config section %s to %s",
                         self.section,
@@ -162,6 +164,14 @@ class Configuration(object):
     def forwarder(self):
         return self.get('forwarder', '192.168.52.3')
 
+    @property
+    def public_network(self):
+        return self.get('public_network', True)
+
+    @property
+    def private_network(self):
+        return self.get('private_network', True)
+
 
 class Plan(object):
 
@@ -179,18 +189,20 @@ class Plan(object):
         self.inventory_dir = self.configuration.config_dir + '/inventory/'
         self.inventory_file = self.inventory_dir + name + '.ini'
 
-        self.networks = {
-            'public': {
-                'router_name': name + '-public-router',
-                'network_name': name + '-public-net',
-                'subnet_name': name + '-public-subnet',
-                'cidr': '192.168.52.0/24'},
-            'private': {
-                'router_name': name + '-private-router',
-                'network_name': name + '-private-net',
-                'subnet_name': name + '-private-subnet',
-                'cidr': '192.168.178.0/24'},
-        }
+        self.networks = dict()
+        cidr_template = '192.168.%d.0/24'
+
+        if configuration.public_network:
+            self.networks['public'] = {
+                'components': [Router, Network, SubNet, RouterInterface],
+                'cidr': cidr_template % 52
+            }
+        if configuration.private_network:
+            self.networks['private'] = {
+                'components': [Network, SubNet],
+                'cidr': cidr_template % 78
+            }
+
         self.ipa_client_vars = self._get_client_vars()
         self.hosts = {}
 
@@ -216,23 +228,29 @@ class Plan(object):
 
 class WorkItem(object):
 
+    def _router_name(self):
+        return self.plan.name + '-' + self.name + '-router'
+
+    def _subnet_name(self):
+        return self.plan.name + '-' + self.name + '-subnet'
+
+    def _network_name(self):
+        return self.plan.name + '-' + self.name + '-net'
+
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
-    def _router_response(self, which):
-        return self.neutron.list_routers(
-            name=self.plan.networks[which]['router_name'])
+    def _router_response(self, router_name):
+        return self.neutron.list_routers(name=router_name)
 
-    def _networks_response(self, which):
-        return self.neutron.list_networks(
-            name=self.plan.networks[which]['network_name'])
+    def _networks_response(self, network_name):
+        return self.neutron.list_networks(name=network_name)
 
-    def _subnet_response(self, which):
-        return self.neutron.list_subnets(
-            name=self.plan.networks[which]['subnet_name'])
+    def _subnet_response(self, subnet_name):
+        return self.neutron.list_subnets(name=subnet_name)
 
     def _subnet_id(self, which):
-        return self._subnet_response(which)['subnets'][0]['id']
+        return self._subnet_response(self._subnet_name())['subnets'][0]['id']
 
     def get_image_id(self, image_name):
         for image in self.nova.images.list():
@@ -283,17 +301,16 @@ class WorkItem(object):
 class Network(WorkItem):
 
     def _networks_response(self):
-        return self.neutron.list_networks(
-            name=self.plan.networks[self.name]['network_name'])
+        return self.neutron.list_networks(name=self._network_name())
 
     def create(self):
         for net in self._networks_response()['networks']:
-            if net['name'] == self.plan.networks[self.name]['network_name']:
+            if net['name'] == self._network_name():
                 return
 
         network = self.neutron.create_network(
             {'network':
-             {'name': self.plan.networks[self.name]['network_name'],
+             {'name': self._network_name(),
               'admin_state_up': True}})
         logging.info(network)
 
@@ -308,16 +325,16 @@ class Network(WorkItem):
 class SubNet(WorkItem):
 
     def create(self):
-        for net in self._subnet_response(self.name)['subnets']:
-            if net['name'] == self.plan.networks[self.name]['subnet_name']:
+        for net in self._subnet_response(self._subnet_name())['subnets']:
+            if net['name'] == self._subnet_name():
                 return
 
-        network = self._networks_response(self.name)['networks'][0]
+        network = self._networks_response(self._network_name())['networks'][0]
         subnet = self.neutron.create_subnet(
             body={
                 'subnets': [
                     {
-                        'name': self.plan.networks[self.name]['subnet_name'],
+                        'name': self._subnet_name(),
                         'cidr': self.plan.networks[self.name]['cidr'],
                         'ip_version': 4,
                         'network_id': network['id']
@@ -327,22 +344,23 @@ class SubNet(WorkItem):
         logging.info(subnet)
 
     def display(self):
-        logging.info(self._subnet_response(self.name))
+        logging.info(self._subnet_response(self._subnet_name()))
 
     def teardown(self):
-        for subnet in self._subnet_response(self.name)['subnets']:
+        for subnet in self._subnet_response(self._subnet_name())['subnets']:
             self.neutron.delete_subnet(subnet['id'])
 
 
 class Router(WorkItem):
 
     def create(self):
-        if len(self._router_response(self.name)['routers']) > 0:
+
+        if len(self._router_response(self._router_name())['routers']) > 0:
             return
 
         router = self.neutron.create_router(
             body={'router': {
-                'name': self.plan.networks[self.name]['router_name'],
+                'name': self._router_name(),
                 'admin_state_up': True,
             }})['router']
         self.neutron.add_gateway_router(
@@ -350,10 +368,10 @@ class Router(WorkItem):
             {'network_id': self._external_id()})
 
     def display(self):
-        logging.info(self._router_response(self.name))
+        logging.info(self._router_response(self._router_name()))
 
     def teardown(self):
-        for router in self._router_response(self.name)['routers']:
+        for router in self._router_response(self._router_name())['routers']:
             self.neutron.remove_gateway_router(router['id'])
             self.neutron.delete_router(router['id'])
 
@@ -364,7 +382,9 @@ class RouterInterface(WorkItem):
         subnet_id = self._subnet_id(self.name)
         if subnet_id is None:
             return
-        router_id = self._router_response(self.name)['routers'][0]['id']
+        router_response = self._router_response(
+            self._router_name())
+        router_id = router_response['routers'][0]['id']
         if router_id is None:
             return
         try:
@@ -377,14 +397,15 @@ class RouterInterface(WorkItem):
     def display(self):
         for router in self._router_response(self.name)['routers']:
             try:
-                print (self._subnet_response(self.name)['subnets'])
+                print (self._subnet_response(self._subnet_name())['subnets'])
             except Exception:
                 pass
 
     def teardown(self):
         try:
-            for router in self._router_response(self.name)['routers']:
-                for subnet in self._subnet_response(self.name)['subnets']:
+            routers = self._router_response(self._router_name())['routers']
+            for router in routers:
+                for subnet in self._subnet_response(self._subnet_name())['subnets']:
                     self.neutron.remove_interface_router(
                         router['id'], {'subnet_id': subnet['id']})
         except Exception:
@@ -495,7 +516,7 @@ class NovaServer(WorkItem):
 
         nics = []
         try:
-            for net_name in ['public', 'private']:
+            for net_name in plan.networks.keys():
                 for network in self._networks_response(net_name)['networks']:
                     nics.append({'net-id': network['id']})
         except exceptions.EndpointNotFound:
@@ -742,10 +763,12 @@ class Inventory(FileWorkItem):
 
 class WorkItemList(object):
 
-    def __init__(self, work_item_factories, session, plan):
-
-        self.work_items = [factory(session, plan)
-                           for factory in work_item_factories]
+    def __init__(self, work_items, session, plan, factories=True):
+        if factories:
+            self.work_items = [factory(session, plan)
+                               for factory in work_items]
+        else:
+             self.work_items = work_items
 
     def create(self):
         for item in self.work_items:
@@ -771,59 +794,15 @@ class WorkItemList(object):
             item.display()
 
 
-def PublicNetwork(session, plan):
-    return Network(session, plan, 'public')
+def network_components(session, plan, name):
+    work_items = [component(session, plan, name)
+                  for component in plan.networks[name]['components']]
+    return WorkItemList(work_items, session, plan, False)
 
-
-def PrivateNetwork(session, plan):
-    return Network(session, plan, 'private')
-
-
-def PublicSubNet(session, plan):
-    return SubNet(session, plan, 'public')
-
-
-def PrivateSubNet(session, plan):
-    return SubNet(session, plan, 'private')
-
-
-def PublicRouter(session, plan):
-    return Router(session, plan, 'public')
-
-
-def PublicRouterInterface(session, plan):
-    return RouterInterface(session, plan, 'public')
-
-
-def PublicNetworkList(session, plan):
-    return WorkItemList(
-        [PublicRouter, PublicNetwork, PublicSubNet, PublicRouterInterface],
-        session, plan)
-
-
-def PrivateNetworkList(session, plan):
-    return WorkItemList(
-        [PrivateNetwork, PrivateSubNet], session, plan)
-
-
-class AllNetworks(WorkItem):
-
-    def __init__(self, session, plan):
-        super(AllServers, self).__init__(session, plan, 'AllServers')
-        self.public = PublicNetworkList(session, plan)
-        self.private = PrivateNetworkList(session, plan)
-
-    def create(self):
-        self.servers.create()
-        self.float_ips.create()
-
-    def display(self):
-        self.servers.display()
-        self.float_ips.display()
-
-    def teardown(self):
-        for server in self.list_servers():
-            self.nova.servers.delete(server.id)
+def all_networks(session, plan):
+    return WorkItemList([network_components(session, plan, network)
+                         for network in plan.networks.keys()],
+                        session, plan, False)
 
 
 def enable_logging():
@@ -933,7 +912,7 @@ class WorkerApplication(Application):
     description = 'Display the state of the system.'
 
     worker_class = {
-        'all': [PrivateNetworkList, PublicNetworkList, AllServers, Inventory],
+        'all': [all_networks, AllServers, Inventory],
         'servers': [AllServers, Inventory],
         'controller': [
             lambda session, plan: NovaServer(session, plan, 'controller'),
@@ -950,7 +929,7 @@ class WorkerApplication(Application):
             lambda session, plan: FloatIP(session, plan, 'openstack'),
             Inventory
         ],
-        'network': [PrivateNetworkList, PublicNetworkList],
+        'network': [all_networks],
         'inventory': [Inventory],
         'hosts_entries': [HostsEntries]
     }
