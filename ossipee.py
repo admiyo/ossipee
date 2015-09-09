@@ -70,7 +70,6 @@ class Configuration(object):
         self.config.add_section(self.section)
         self.config.set(self.section, 'profile', self.profile)
         self.config.set(self.section, 'name', self.name)
-        self.config.set(self.section, 'pubkey', self.key)
         self.config.set(self.section, 'forwarder',  self.forwarder)
         self.config.set(self.section, 'public_network', self.public_network)
         self.config.set(self.section, 'private_network', self.private_network)
@@ -510,13 +509,16 @@ class NovaServer(WorkItem):
     def user_data_template(self):
         return user_data_template
 
+    def _pubkey(self):
+        self.nova.keypairs.list()[0].id
+
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
             return
 
         nics = []
         try:
-            for net_name in plan.networks.keys():
+            for net_name in self.plan.networks.keys():
                 for network in self._networks_response(net_name)['networks']:
                     nics.append({'net-id': network['id']})
         except exceptions.EndpointNotFound:
@@ -535,7 +537,7 @@ class NovaServer(WorkItem):
             min_cont=1,
             max_count=1,
             userdata=user_data,
-            key_name=self.plan.key,
+            key_name=self._pubkey(),
             availability_zone=None,
             block_device_mapping=None,
             scheduler_hints=None,
