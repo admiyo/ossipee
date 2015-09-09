@@ -111,7 +111,6 @@ class Configuration(object):
             logging.error("Config file created. Please edit this with the "
                           "appropriate options and then run again.")
             exit(1)
-
         self.config.read(self.config_file)
 
         if not self.config.has_section(self.section):
@@ -166,11 +165,11 @@ class Configuration(object):
 
     @property
     def public_network(self):
-        return self.get('public_network', True)
+        return self.config.getboolean(self.section, 'public_network')
 
     @property
     def private_network(self):
-        return self.get('private_network', True)
+        return self.config.getboolean(self.section, 'private_network')
 
 
 class Plan(object):
