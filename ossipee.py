@@ -13,7 +13,6 @@ import time
 import ConfigParser
 
 from keystoneclient import auth as ksc_auth
-from keystoneclient.openstack.common.apiclient import exceptions as kcexceptions
 from keystoneclient import session as ksc_session
 from keystoneclient.openstack.common.apiclient import exceptions
 from keystoneclient.v3 import client as keystone_v3
@@ -64,7 +63,7 @@ class Configuration(object):
             'flavor': 'm1.medium',
         }
     }
-    
+
     PROFILE_VARS = ['cloud_user', 'image', 'flavor']
 
     def _default_config_options(self):
@@ -165,6 +164,7 @@ class Configuration(object):
 
 
 class Plan(object):
+
     def __init__(self, configuration):
         self.configuration = configuration
 
@@ -215,6 +215,7 @@ class Plan(object):
 
 
 class WorkItem(object):
+
     def _external_id(self):
         return self.neutron.list_networks(name='external')['networks'][0]['id']
 
@@ -262,12 +263,10 @@ class WorkItem(object):
         ip_address = None
         for _, address in server.addresses.iteritems():
             for interface in address:
-                if interface.get('OS-EXT-IPS:type','') == 'floating':
-                    ip_address =  interface.get('addr')
-        return ip_address        
+                if interface.get('OS-EXT-IPS:type', '') == 'floating':
+                    ip_address = interface.get('addr')
+        return ip_address
 
-
-            
     def __init__(self, session, plan, name):
         self.name = name
         self.keystone = keystone_v3.Client(session=session)
@@ -307,6 +306,7 @@ class Network(WorkItem):
 
 
 class SubNet(WorkItem):
+
     def create(self):
         for net in self._subnet_response(self.name)['subnets']:
             if net['name'] == self.plan.networks[self.name]['subnet_name']:
@@ -359,6 +359,7 @@ class Router(WorkItem):
 
 
 class RouterInterface(WorkItem):
+
     def create(self):
         subnet_id = self._subnet_id(self.name)
         if subnet_id is None:
@@ -381,10 +382,13 @@ class RouterInterface(WorkItem):
                 pass
 
     def teardown(self):
-        for router in self._router_response(self.name)['routers']:
-            for subnet in self._subnet_response(self.name)['subnets']:
-                self.neutron.remove_interface_router(
-                    router['id'], {'subnet_id': subnet['id']})
+        try:
+            for router in self._router_response(self.name)['routers']:
+                for subnet in self._subnet_response(self.name)['subnets']:
+                    self.neutron.remove_interface_router(
+                        router['id'], {'subnet_id': subnet['id']})
+        except Exception:
+            pass
 
 
 class FloatIP(WorkItem):
@@ -406,9 +410,9 @@ class FloatIP(WorkItem):
             time.sleep(5)
             server.add_floating_ip(float.ip)
         except AttributeError:
-            #if floating IPs are auto assigned, there will
-            #be none listed
-            return None            
+            # if floating IPs are auto assigned, there will
+            # be none listed
+            return None
         return float.ip
 
     def display_ip_for_server(self, server):
@@ -441,9 +445,8 @@ class FloatIP(WorkItem):
                 attempts = attempts - 1
                 time.sleep(5)
 
-                
     def create(self):
-        
+
         server = self.get_server_by_name(self.make_fqdn(self.name))
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
@@ -462,9 +465,8 @@ class FloatIP(WorkItem):
             time.sleep(5)
             attempts -= 1
             server = self.get_server_by_name(self.make_fqdn(self.name))
-            ip_address =  self.calculate_address_for_server(server)
+            ip_address = self.calculate_address_for_server(server)
 
-                    
         subprocess.call(['ssh-keygen', '-R', fqdn])
         subprocess.call(['ssh-keygen', '-R', ip_address])
         self.reset_ssh(ip_address)
@@ -497,7 +499,7 @@ class NovaServer(WorkItem):
                 for network in self._networks_response(net_name)['networks']:
                     nics.append({'net-id': network['id']})
         except exceptions.EndpointNotFound:
-            #HACK to get OS1 to work
+            # HACK to get OS1 to work
             nics.append({'net-id': 'f975ca87-2bff-4230-b6ad-5d9ec93749e1'})
 
         response = self.nova.servers.create(
@@ -531,6 +533,20 @@ class NovaServer(WorkItem):
             except Exception:
                 logging.info('.')
                 pass
+
+    def wait_for_destruction(self, host_id):
+        attempts = 5
+        while attempts > 0:
+            try:
+                host = self.nova.servers.get(host_id)
+                attempts = attempts - 1
+                logging.info(
+                    'Teardown of host not completed. ' +
+                    'Waiting 5 second to check again.' +
+                    'Remaining attempts = %d' % attempts)
+                time.sleep(5)
+            except Exception:
+                break
 
     #  Over ride this to create a subset of the hosts
     def host_name_list(self):
@@ -570,6 +586,7 @@ class NovaServer(WorkItem):
 
 
 class HostsEntries(WorkItem):
+
     def __init__(self, session, plan):
         super(HostsEntries, self).__init__(session, plan, 'hosts')
         self.host_file = '/etc/hosts'
@@ -612,6 +629,7 @@ class HostsEntries(WorkItem):
 
 
 class AllServers(WorkItem):
+
     def __init__(self, session, plan):
         super(AllServers, self).__init__(session, plan, 'AllServers')
         self.servers = WorkItemList([], session, plan)
@@ -672,7 +690,6 @@ class FileWorkItem(WorkItem):
             os.remove(self.file_name)
 
 
-
 class Inventory(FileWorkItem):
 
     def __init__(self, session, plan):
@@ -685,13 +702,13 @@ class Inventory(FileWorkItem):
         nameserver = None
         for _, address in ipa_server.addresses.iteritems():
             for interface in address:
-                if interface.get('OS-EXT-IPS:type','') == 'floating':
-                    ip_address =  interface.get('addr')
+                if interface.get('OS-EXT-IPS:type', '') == 'floating':
+                    ip_address = interface.get('addr')
                     for interface in address:
-                        if interface.get('OS-EXT-IPS:type','') == 'fixed':
+                        if interface.get('OS-EXT-IPS:type', '') == 'fixed':
                             nameserver = interface['addr']
         return nameserver
-        
+
     def write_contents(self, f):
         ipa_server = self.get_server_by_name(self.make_fqdn('ipa'))
         nameserver = self._get_nameserver_address(ipa_server)
@@ -790,10 +807,12 @@ def PrivateNetworkList(session, plan):
 
 
 class AllNetworks(WorkItem):
+
     def __init__(self, session, plan):
         super(AllServers, self).__init__(session, plan, 'AllServers')
         self.public = PublicNetworkList(session, plan)
-        self.private =  PrivateNetworkList(session, plan)
+        self.private = PrivateNetworkList(session, plan)
+
     def create(self):
         self.servers.create()
         self.float_ips.create()
@@ -805,8 +824,6 @@ class AllNetworks(WorkItem):
     def teardown(self):
         for server in self.list_servers():
             self.nova.servers.delete(server.id)
-
-
 
 
 def enable_logging():
