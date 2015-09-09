@@ -516,7 +516,7 @@ class NovaServer(WorkItem):
         return user_data_template
 
     def _pubkey(self):
-        self.nova.keypairs.list()[0].id
+        return self.nova.keypairs.list()[0].id
 
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
