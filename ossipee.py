@@ -208,6 +208,7 @@ class Plan(object):
 
     def _get_client_vars(self):
         return {
+            'deployment_dir': self.deployment_dir,
             'cloud_user': self.profile['cloud_user'],
             'ipa_forwarder': self.forwarder,
             'ipa_domain': self.domain_name,
