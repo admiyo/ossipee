@@ -185,8 +185,9 @@ class Plan(object):
         self.profile = self.configuration.profile
 
         self.domain_name = name + '.test'
-        self.inventory_dir = self.configuration.config_dir + '/inventory/'
-        self.inventory_file = self.inventory_dir + name + '.ini'
+        self.deployments_dir = self.configuration.config_dir + '/deployments'
+        self.deployment_dir = self.deployments_dir + '/' + name
+        self.inventory_file = self.deployment_dir + '/inventory.ini'
 
         self.networks = dict()
         cidr_template = '192.168.%d.0/24'
@@ -724,7 +725,7 @@ class Inventory(FileWorkItem):
 
     def __init__(self, session, plan):
         super(Inventory, self).__init__(session, plan, 'inventory')
-        self.directory = self.plan.inventory_dir
+        self.directory = self.plan.deployment_dir
         self.file_name = self.plan.inventory_file
 
     def _get_nameserver_address(self, ipa_server):
