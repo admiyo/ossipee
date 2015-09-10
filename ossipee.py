@@ -17,7 +17,7 @@ from keystoneclient import session as ksc_session
 from keystoneclient.openstack.common.apiclient import exceptions
 from keystoneclient.v3 import client as keystone_v3
 from neutronclient.neutron import client as neutronclient
-from neutronclient.common import exceptions as neutronclient_exceptions
+from neutronclient.common import exceptions as neutron_exceptions
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
 
@@ -289,6 +289,25 @@ class WorkItem(object):
                     ip_address = interface.get('addr')
         return ip_address
 
+    def reset_ssh(self, ip_address):
+        attempts = 5
+        while(attempts):
+            try:
+                subprocess.check_call(
+                    ['ssh',
+                     '-o', 'StrictHostKeyChecking=no',
+                     '-o', 'PasswordAuthentication=no',
+                     '-l', self.plan.profile['cloud_user'],
+                     ip_address, 'hostname'])
+                attempts = 0
+            except subprocess.CalledProcessError:
+                logging.info(
+                    'ssh to server failed.' +
+                    '  Waiting 5 seconds to retry %s.' % ip_address +
+                    '  Attempts left = %d', attempts)
+                attempts = attempts - 1
+                time.sleep(5)
+
     def __init__(self, session, plan, name):
         self.name = name
         self.keystone = keystone_v3.Client(session=session)
@@ -352,7 +371,20 @@ class SubNet(WorkItem):
 
     def teardown(self):
         for subnet in self._subnet_response(self._subnet_name())['subnets']:
-            self.neutron.delete_subnet(subnet['id'])
+            attempts = 2
+            while (attempts):
+                try:
+                    self.neutron.delete_subnet(subnet['id'])
+                    attempts = 0
+                except neutron_exceptions.Conflict:
+                    logging.info(
+                        'teardown of subnet failed.' +
+                        '  Waiting 5 seconds to retry.' +
+                        '  Attempts left = %d', attempts)
+                    attempts = attempts - 1
+                    time.sleep(5)
+                except neutron_exceptions.NotFound:
+                    pass
 
 
 class Router(WorkItem):
@@ -395,7 +427,7 @@ class RouterInterface(WorkItem):
             self.neutron.add_interface_router(
                 router_id,
                 {'subnet_id': subnet_id})
-        except neutronclient_exceptions.BadRequest:
+        except neutron_exceptions.BadRequest:
             logging.warn('interface_router (probably) already exists')
         except exceptions.BadRequest:
             logging.warn('interface_router (probably) already exists')
@@ -408,15 +440,23 @@ class RouterInterface(WorkItem):
                 pass
 
     def teardown(self):
-        try:
-            routers = self._router_response(self._router_name())['routers']
-            for router in routers:
-                for subnet in self._subnet_response(
-                        self._subnet_name())['subnets']:
-                    self.neutron.remove_interface_router(
-                        router['id'], {'subnet_id': subnet['id']})
-        except Exception:
-            pass
+        routers = self._router_response(self._router_name())['routers']
+        for router in routers:
+            for subnet in self._subnet_response(
+                    self._subnet_name())['subnets']:
+                attempts = 5
+                while attempts:
+                    try:
+                        self.neutron.remove_interface_router(
+                            router['id'], {'subnet_id': subnet['id']})
+                        attempts = 0
+                    except neutron_exceptions.Conflict:
+                        logging.info(
+                            'Teardown of interface_router failed.' +
+                            '  Waiting 5 seconds to retry.'
+                            '  Attempts left = %d', attempts)
+                        time.sleep(5)
+                        attempts = attempts - 1
 
 
 class FloatIP(WorkItem):
@@ -454,33 +494,14 @@ class FloatIP(WorkItem):
                 server.remove_floating_ip(float)
                 break
 
-    def reset_ssh(self, ip_address):
-        attempts = 5
-        while(attempts):
-            try:
-                subprocess.check_call(
-                    ['ssh',
-                     '-o', 'StrictHostKeyChecking=no',
-                     '-o', 'PasswordAuthentication=no',
-                     '-l', self.plan.profile['cloud_user'],
-                     ip_address, 'hostname'])
-                attempts = 0
-            except subprocess.CalledProcessError:
-                logging.info(
-                    'ssh to server failed.' +
-                    '  Waiting 5 seconds to retry %s.' % ip_address +
-                    '  Attempts left = %d', attempts)
-                attempts = attempts - 1
-                time.sleep(5)
-
     def create(self):
 
-        server = self.get_server_by_name(self.make_fqdn(self.name))
+        fqdn = self.make_fqdn(self.name)
+        server = self.get_server_by_name(fqdn)
         for float in self.nova.floating_ips.list():
             if float.instance_id == server.id:
                 return
 
-        fqdn = self.make_fqdn(self.name)
         server = self.get_server_by_name(fqdn)
         ip_address = self.assign_next_ip(server)
         ip_address = self.calculate_address_for_server(server)
@@ -495,7 +516,6 @@ class FloatIP(WorkItem):
             server = self.get_server_by_name(self.make_fqdn(self.name))
             ip_address = self.calculate_address_for_server(server)
 
-        subprocess.call(['ssh-keygen', '-R', fqdn])
         subprocess.call(['ssh-keygen', '-R', ip_address])
         self.reset_ssh(ip_address)
 
@@ -638,6 +658,11 @@ class HostsEntries(WorkItem):
 
                 stdout=subprocess.PIPE)
             out, err = process.communicate()
+
+            fqdn = self.make_fqdn(host)
+            subprocess.call(['ssh-keygen', '-R', fqdn])
+            self.reset_ssh(fqdn)
+
         self.display()
 
     def display(self):
@@ -681,7 +706,12 @@ class AllServers(WorkItem):
 
     def teardown(self):
         for server in self.list_servers():
-            self.nova.servers.delete(server.id)
+            try:
+                self.nova.servers.delete(server.id)
+            except nova_exceptions.NotFound:
+                # Race condition.  If its gone, it is safe
+                # to progress.
+                pass
 
 
 class FileWorkItem(WorkItem):
@@ -750,7 +780,7 @@ class Inventory(FileWorkItem):
                 server = self.get_server_by_name(self.make_fqdn(host))
                 ip = self.calculate_address_for_server(server)
                 f.write('[%s]\n' % host)
-                f.write('%s\n\n' % ip)
+                f.write('%s\n\n' % self.make_fqdn(host))
                 f.write('[%s:vars]\n' % host)
                 for key, value in vars.iteritems():
                     f.write('%s=%s\n' % (key, value))
@@ -924,21 +954,24 @@ class WorkerApplication(Application):
     description = 'Display the state of the system.'
 
     worker_class = {
-        'all': [all_networks, AllServers, Inventory],
-        'servers': [AllServers, Inventory],
+        'all': [all_networks, AllServers, HostsEntries, Inventory],
+        'servers': [AllServers, HostsEntries, Inventory],
         'controller': [
             lambda session, plan: NovaServer(session, plan, 'controller'),
             lambda session, plan: FloatIP(session, plan, 'controller'),
+            HostsEntries,
             Inventory
         ],
         'ipa': [
             lambda session, plan: NovaServer(session, plan, 'ipa'),
             lambda session, plan: FloatIP(session, plan, 'ipa'),
+            HostsEntries,
             Inventory
         ],
         'openstack': [
             lambda session, plan: NovaServer(session, plan, 'openstack'),
             lambda session, plan: FloatIP(session, plan, 'openstack'),
+            HostsEntries,
             Inventory
         ],
         'network': [all_networks],
