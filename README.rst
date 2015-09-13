@@ -109,3 +109,59 @@ when creating the virtual machine. There are several profiles suported:
         - 'flavor': 'm1.medium',
 
 The image and flavor names must match.
+
+Ossipee uses the AUTH_URL to determine the cloud name.  For now, this
+list of known AUHT_URLS are hard coded to produce one of the follwing:
+
+- oslab
+- os1
+- dreamcompute
+
+ This value plus the `name` value will be combined to create the output
+ directory.  For example, if name = `ayoung` and the cloud resolves to
+ `os1` then the output directory is
+ `$HOME/.ossipy/deployments/ayoung.os1`.  INside this directory is
+ -  inventory.ini
+
+When paired with rippowam, this directoruy becomes the local store
+for the following files:
+- adminrc: admin keystone config with userid and password
+- demorc:  demo keystone config with userid and password
+- fed-accrc: keystone config for use with SAML federation
+- inventory.ini:  ansible inventory file
+- kerb-accrc: keystone config for use with Kerberos and SSSD federation
+- krb5.conf:  Kerberso config file used with the KRB5_CONFIG
+  environment variable
+ 
+
+ossipy accepts a `--section` paramter To better organize the .config
+file.  This referest to a subsection of the configuration file that
+overrides the deployment specirfic variables.  In the sample config file:
+
+
+[scope]
+
+[oslab]
+name = ayoung
+profile = rhel7
+private_network = false
+public_network = true
+forwarder = 192.168.52.3
+
+[os1]
+name = ayoung
+forwarder = 172.16.12.6
+private_network = false
+public_network = false
+profile = os1rhel7
+
+
+With the command  `~/devel/ossipee/ossipee-create --section os1`  The
+network creation section would be skipped, the deployment name would
+be ayoung, creating a fqdn for the ipa server: ipa.ayoung.os1.test and
+storing the file in `/.ossipee/deployements/.ayoung.os1`
+
+Ossipee creates entires in the systems /etc/hosts file, using sudo.
+These amp to the public IP addresses for the hosts created.  The fqdn
+values are now useing in the asnible uinventory files in place of the
+IP addresses.
