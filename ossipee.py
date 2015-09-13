@@ -29,6 +29,14 @@ fqdn:  %(fqdn)s
 
 '''
 
+# TODO(ayoung): These should be in the config file
+CLOUD_AUTH_URLS = {
+    'http://controller.oslab.openstack.engineering.redhat.com:5000/v3':
+    'oslab',
+    'http://control.os1.phx2.redhat.com:5000/v3/': 'os1',
+    'https://keystone.dream.io/v3': 'dreamcompute'
+}
+
 
 class Configuration(object):
 
@@ -174,7 +182,7 @@ class Configuration(object):
 
 class Plan(object):
 
-    def __init__(self, configuration):
+    def __init__(self, configuration, session):
         self.configuration = configuration
 
         name = self.configuration.name
@@ -183,10 +191,12 @@ class Plan(object):
         self.security_groups = self.configuration.security_groups
         self.key = self.configuration.key
         self.profile = self.configuration.profile
+        self.cloud = CLOUD_AUTH_URLS.get(session.auth.auth_url, 'unknown')
 
-        self.domain_name = name + '.test'
+        self.domain_name = name + '.' + self.cloud + '.test'
         self.deployments_dir = self.configuration.config_dir + '/deployments'
-        self.deployment_dir = self.deployments_dir + '/' + name
+        self.deployment_dir = (self.deployments_dir +
+                               '/' + name + '.' + self.cloud)
         self.inventory_file = self.deployment_dir + '/inventory.ini'
 
         self.networks = dict()
@@ -277,9 +287,11 @@ class WorkItem(object):
         return servers[0]
 
     def floating_ip_for_server(self, server):
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                return (float.ip)
+        for _, address in server.addresses.iteritems():
+            for interface in address:
+                if interface.get('OS-EXT-IPS:type', '') == 'floating':
+                    ip = interface['addr']
+        return ip
 
     def calculate_address_for_server(self, server):
         ip_address = None
@@ -446,17 +458,19 @@ class RouterInterface(WorkItem):
                     self._subnet_name())['subnets']:
                 attempts = 5
                 while attempts:
+                    attempts = attempts - 1
                     try:
                         self.neutron.remove_interface_router(
                             router['id'], {'subnet_id': subnet['id']})
                         attempts = 0
-                    except neutron_exceptions.Conflict:
+                    except neutron_exceptions.Conflict as e:
+                        if attempts == 0:
+                            raise e
                         logging.info(
                             'Teardown of interface_router failed.' +
                             '  Waiting 5 seconds to retry.'
                             '  Attempts left = %d', attempts)
                         time.sleep(5)
-                        attempts = attempts - 1
 
 
 class FloatIP(WorkItem):
@@ -508,7 +522,7 @@ class FloatIP(WorkItem):
         attempts = 4
         while(ip_address is None and attempts):
             logging.info(
-                'Getting IP address for sever failed.' +
+                'Getting IP address for server failed.' +
                 '  Waiting 5 seconds to retry.'
                 '  Attempts left = %d', attempts)
             time.sleep(5)
@@ -527,8 +541,11 @@ class FloatIP(WorkItem):
             pass
 
     def teardown(self):
-        server = self.get_server_by_name(self.make_fqdn(self.name))
-        self.remove_float_from_server(server)
+        try:
+            server = self.get_server_by_name(self.make_fqdn(self.name))
+            self.remove_float_from_server(server)
+        except IndexError:
+            pass
 
 
 class NovaServer(WorkItem):
@@ -645,8 +662,7 @@ class HostsEntries(WorkItem):
 
     def fetch_float_ip_from_server(self, server_name):
         server = self.get_server_by_name(self.make_fqdn(server_name))
-        ip = self.floating_ip_for_server(server)
-        return ip
+        return self.floating_ip_for_server(server)
 
     def create(self):
         self.teardown()
@@ -666,8 +682,7 @@ class HostsEntries(WorkItem):
         self.display()
 
     def display(self):
-        process = subprocess.Popen(['sudo',
-                                    'grep',
+        process = subprocess.Popen(['grep',
                                     '-e',
                                     "%s$" % self.plan.domain_name,
                                     self.host_file],
@@ -705,6 +720,7 @@ class AllServers(WorkItem):
         self.float_ips.display()
 
     def teardown(self):
+        self.float_ips.teardown()
         for server in self.list_servers():
             try:
                 self.nova.servers.delete(server.id)
@@ -779,8 +795,9 @@ class Inventory(FileWorkItem):
             try:
                 server = self.get_server_by_name(self.make_fqdn(host))
                 ip = self.calculate_address_for_server(server)
+                fqdn = self.make_fqdn(host)
                 f.write('[%s]\n' % host)
-                f.write('%s\n\n' % self.make_fqdn(host))
+                f.write('%s\n\n' % fqdn)
                 f.write('[%s:vars]\n' % host)
                 for key, value in vars.iteritems():
                     f.write('%s=%s\n' % (key, value))
@@ -788,18 +805,33 @@ class Inventory(FileWorkItem):
                 f.write('\n')
 
                 if not host == 'ipa':
-                    ipa_clients.append(ip)
+                    ipa_clients.append(fqdn)
             except IndexError:
                 pass
 
         f.write('[ipa_clients]\n')
-        for ip in ipa_clients:
-            f.write('%s\n' % ip)
+        for fqdn in ipa_clients:
+            f.write('%s\n' % fqdn)
 
-        f.write('[%ipa_clients:vars]\n')
+        f.write('[ipa_clients:vars]\n')
 
         for key, value in self.plan.ipa_client_vars.iteritems():
             f.write('%s=%s\n' % (key, value))
+
+
+class Rippowam(WorkItem):
+
+    def create(self):
+        process = subprocess.call(
+            ['ansible-playbook', '-i',
+             self.plan.inventory_file,
+             os.getenv('HOME') + '/devel/rippowam/site.yml'])
+
+    def display(self):
+        pass
+
+    def teardown(self):
+        pass
 
 
 class WorkItemList(object):
@@ -939,7 +971,7 @@ class Application(object):
     @property
     def plan(self):
         if not self._plan:
-            self._plan = Plan(self.configuration)
+            self._plan = Plan(self.configuration, self.session)
             for host in ['ipa', 'openstack']:
                 self._plan.add_host(host)
 
@@ -976,6 +1008,10 @@ class WorkerApplication(Application):
         ],
         'network': [all_networks],
         'inventory': [Inventory],
+        'rippowam': [
+            lambda session, plan: Rippowam(session, plan, 'controller')
+        ],
+
         'hosts_entries': [HostsEntries]
     }
 
