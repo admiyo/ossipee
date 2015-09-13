@@ -31,7 +31,7 @@ To get started, run
 
   ossipee-display
 
-This will generate a blank config file in 
+This will generate a blank config file in
 
   $HOME/.ossipee/config.ini
 
@@ -96,17 +96,17 @@ A profile is the combination of computer Flavor and image that will be used
 when creating the virtual machine. There are several profiles suported:
 
 -    'centos7':
-        - 'cloud_user': 'centos',
-        - 'image': 'centos-7-cloud',
-        - 'flavor': 'm1.medium',	
+	- 'cloud_user': 'centos',
+	- 'image': 'centos-7-cloud',
+	- 'flavor': 'm1.medium',
 -    'rhel7':
-        - 'cloud_user': 'cloud-user',
-        - 'image': 'rhel-guest-image-7.1-20150224.0',
-        - 'flavor': 'm1.medium',
--    'f22': 
-        - 'cloud_user': 'fedora',
-        - 'image': 'Fedora 22 Cloud Image',
-        - 'flavor': 'm1.medium',
+	- 'cloud_user': 'cloud-user',
+	- 'image': 'rhel-guest-image-7.1-20150224.0',
+	- 'flavor': 'm1.medium',
+-    'f22':
+	- 'cloud_user': 'fedora',
+	- 'image': 'Fedora 22 Cloud Image',
+	- 'flavor': 'm1.medium',
 
 The image and flavor names must match.
 
@@ -132,7 +132,7 @@ for the following files:
 - kerb-accrc: keystone config for use with Kerberos and SSSD federation
 - krb5.conf:  Kerberso config file used with the KRB5_CONFIG
   environment variable
- 
+
 
 ossipy accepts a `--section` paramter To better organize the .config
 file.  This referest to a subsection of the configuration file that
