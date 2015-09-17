@@ -562,14 +562,10 @@ class NovaServer(WorkItem):
             return
 
         nics = []
-        try:
-            for net_name in self.plan.networks.keys():
-                for network in self._networks_response(
-                        self.build_network_name(net_name))['networks']:
-                    nics.append({'net-id': network['id']})
-        except exceptions.EndpointNotFound:
-            # HACK to get OS1 to work
-            nics.append({'net-id': 'f975ca87-2bff-4230-b6ad-5d9ec93749e1'})
+        for net_name in self.plan.networks.keys():
+            for network in self._networks_response(
+                    self.build_network_name(net_name))['networks']:
+                nics.append({'net-id': network['id']})
 
         response = self.nova.servers.create(
             self.fqdn(),
