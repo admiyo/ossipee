@@ -124,7 +124,23 @@ class Configuration(object):
         if not self.config.has_section(self.section):
             self._default_config_options()
 
-        self.security_groups = ['default']
+        self.security_ports = {
+            'openstack': [
+                22,  # SSH
+                80, 443,  # Horizon
+                5000, 35357,  # Keystone
+                9191, 9292,  # Glance
+                8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
+                8776,  # Cinder
+            ],
+            'ipa': [
+                22,  # SSH
+                80, 443,  # HTTP
+                389, 686,  # LDAP
+                88, 464,  # Kerberos, kpasswd
+                53,  # DNS
+                123,  # NTP,
+            ]}
 
     def get(self, name, default=None):
         try:
@@ -188,7 +204,14 @@ class Plan(object):
         name = self.configuration.name
         self.name = self.configuration.name
         self.forwarder = self.configuration.forwarder
-        self.security_groups = self.configuration.security_groups
+        self.security_groups = []
+        self.security_ports = {}
+
+        for group, ports in self.configuration.security_ports.iteritems():
+            sec_group = "%s-%s" % (name, group)
+            self.security_groups.append(sec_group)
+            self.security_ports[sec_group] = ports
+
         self.key = self.configuration.key
         self.profile = self.configuration.profile
         self.cloud = CLOUD_AUTH_URLS.get(session.auth.auth_url, 'unknown')
@@ -235,6 +258,7 @@ class Plan(object):
             print ('host %s already exists.' % name)
             return
         self.hosts[name] = self._get_client_vars()
+        self.hosts[name]['security_group'] = "%s-%s" % (self.name, name)
 
 
 class WorkItem(object):
@@ -301,6 +325,9 @@ class WorkItem(object):
                     ip_address = interface.get('addr')
         return ip_address
 
+    def build_security_group_name(self, key):
+        return "%s-%s" % (key, self.name)
+
     def reset_ssh(self, ip_address):
         attempts = 5
         while(attempts):
@@ -319,6 +346,20 @@ class WorkItem(object):
                     '  Attempts left = %d', attempts)
                 attempts = attempts - 1
                 time.sleep(5)
+
+    def wait_for_destruction(self, host_id):
+        attempts = 5
+        while attempts > 0:
+            try:
+                host = self.nova.servers.get(host_id)
+                attempts = attempts - 1
+                logging.info(
+                    'Teardown of host not completed. ' +
+                    'Waiting 5 second to check again.' +
+                    'Remaining attempts = %d' % attempts)
+                time.sleep(5)
+            except Exception:
+                break
 
     def __init__(self, session, plan, name):
         self.name = name
@@ -548,6 +589,48 @@ class FloatIP(WorkItem):
             pass
 
 
+class SecurityGroup(WorkItem):
+
+    def __init__(self, session, plan):
+        super(SecurityGroup, self).__init__(session, plan, 'SecurityGroup')
+
+    def create(self):
+        missing_groups = list(self.plan.security_groups)
+        for sec_group in self.nova.security_groups.list():
+            if sec_group.name in self.plan.security_groups:
+                missing_groups.remove(sec_group.name)
+
+        for group_name in missing_groups:
+            sec_group = self.nova.security_groups.create(
+                name=group_name,
+                description='')
+            for port in self.plan.security_ports[group_name]:
+                self.nova.security_group_rules.create(
+                    sec_group.id,
+                    from_port=port,
+                    ip_protocol='tcp',
+                    to_port=port,
+                    cidr='0.0.0.0/0')
+
+        self.display()
+
+    def display(self):
+        for sec_group in self.nova.security_groups.list():
+            if sec_group.name not in self.plan.security_groups:
+                continue
+            print ("group_id: %s" % sec_group.id)
+            print ("group_name: %s" % sec_group.name)
+
+            for rule in self.nova.security_groups.get(sec_group).rules:
+                print (rule)
+
+    def teardown(self):
+        for sec_group in self.nova.security_groups.list():
+            if sec_group.name in self.plan.security_groups:
+                self.nova.security_groups.delete(sec_group)
+        self.display()
+
+
 class NovaServer(WorkItem):
 
     # Override this if the host needs more complex userdata
@@ -567,11 +650,12 @@ class NovaServer(WorkItem):
                     self.build_network_name(net_name))['networks']:
                 nics.append({'net-id': network['id']})
 
+        security_groups = [self.plan.hosts[name]['security_group']]
         response = self.nova.servers.create(
             self.fqdn(),
             self.get_image_id(self.plan.profile['image']),
             self.get_flavor_id(self.plan.profile['flavor']),
-            security_groups=self.plan.security_groups,
+            security_groups=security_groups,
             nics=nics,
             meta=None,
             files=None,
@@ -598,20 +682,6 @@ class NovaServer(WorkItem):
             except Exception:
                 logging.info('.')
                 pass
-
-    def wait_for_destruction(self, host_id):
-        attempts = 5
-        while attempts > 0:
-            try:
-                host = self.nova.servers.get(host_id)
-                attempts = attempts - 1
-                logging.info(
-                    'Teardown of host not completed. ' +
-                    'Waiting 5 second to check again.' +
-                    'Remaining attempts = %d' % attempts)
-                time.sleep(5)
-            except Exception:
-                break
 
     #  Over ride this to create a subset of the hosts
     def host_name_list(self):
@@ -724,6 +794,8 @@ class AllServers(WorkItem):
                 # Race condition.  If its gone, it is safe
                 # to progress.
                 pass
+        for server in self.list_servers():
+            self.wait_for_destruction(server.id)
 
 
 class FileWorkItem(WorkItem):
@@ -982,7 +1054,8 @@ class WorkerApplication(Application):
     description = 'Display the state of the system.'
 
     worker_class = {
-        'all': [all_networks, AllServers, HostsEntries, Inventory],
+        'all': [all_networks, SecurityGroup,
+                AllServers, HostsEntries, Inventory],
         'servers': [AllServers, HostsEntries, Inventory],
         'controller': [
             lambda session, plan: NovaServer(session, plan, 'controller'),
@@ -1007,7 +1080,7 @@ class WorkerApplication(Application):
         'rippowam': [
             lambda session, plan: Rippowam(session, plan, 'controller')
         ],
-
+        'security_group': [SecurityGroup],
         'hosts_entries': [HostsEntries]
     }
 
