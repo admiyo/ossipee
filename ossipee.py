@@ -125,7 +125,7 @@ class Configuration(object):
             self._default_config_options()
 
         self.security_ports = {
-            'openstack':{
+            'openstack': {
                 'tcp': [
                     22,  # SSH
                     80, 443,  # Horizon
@@ -133,9 +133,9 @@ class Configuration(object):
                     9191, 9292,  # Glance
                     8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
                     8776,  # Cinder
-            ]},
+                ]},
             'ipa': {
-                'tcp':[
+                'tcp': [
                     22,  # SSH
                     80, 443,  # HTTP
                     389, 686,  # LDAP
@@ -143,7 +143,7 @@ class Configuration(object):
                     53,  # DNS
                     123,  # NTP,
                 ],
-                'udp':[]
+                'udp': []
             }
         }
 
