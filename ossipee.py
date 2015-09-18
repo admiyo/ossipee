@@ -143,7 +143,12 @@ class Configuration(object):
                     53,  # DNS
                     123,  # NTP,
                 ],
-                'udp': []
+                'udp': [
+                    88, 464,  # Kerberos, kpasswd
+                    123,  # NTP
+                    53  # DNS
+
+                ]
             }
         }
 
