@@ -125,22 +125,27 @@ class Configuration(object):
             self._default_config_options()
 
         self.security_ports = {
-            'openstack': [
-                22,  # SSH
-                80, 443,  # Horizon
-                5000, 35357,  # Keystone
-                9191, 9292,  # Glance
-                8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
-                8776,  # Cinder
-            ],
-            'ipa': [
-                22,  # SSH
-                80, 443,  # HTTP
-                389, 686,  # LDAP
-                88, 464,  # Kerberos, kpasswd
-                53,  # DNS
-                123,  # NTP,
-            ]}
+            'openstack':{
+                'tcp': [
+                    22,  # SSH
+                    80, 443,  # Horizon
+                    5000, 35357,  # Keystone
+                    9191, 9292,  # Glance
+                    8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
+                    8776,  # Cinder
+            ]},
+            'ipa': {
+                'tcp':[
+                    22,  # SSH
+                    80, 443,  # HTTP
+                    389, 686,  # LDAP
+                    88, 464,  # Kerberos, kpasswd
+                    53,  # DNS
+                    123,  # NTP,
+                ],
+                'udp':[]
+            }
+        }
 
     def get(self, name, default=None):
         try:
@@ -603,15 +608,16 @@ class SecurityGroup(WorkItem):
         for group_name in missing_groups:
             sec_group = self.nova.security_groups.create(
                 name=group_name,
-                description='')
-            for port in self.plan.security_ports[group_name]:
-                self.nova.security_group_rules.create(
-                    sec_group.id,
-                    from_port=port,
-                    ip_protocol='tcp',
-                    to_port=port,
-                    cidr='0.0.0.0/0')
-
+                description=group_name)
+            security_ports = self.plan.security_ports[group_name]
+            for protocol, ports in security_ports.iteritems():
+                for port in ports:
+                    self.nova.security_group_rules.create(
+                        sec_group.id,
+                        from_port=port,
+                        ip_protocol=protocol,
+                        to_port=port,
+                        cidr='0.0.0.0/0')
         self.display()
 
     def display(self):
