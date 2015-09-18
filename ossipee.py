@@ -75,13 +75,13 @@ class Configuration(object):
 
     PROFILE_VARS = ['cloud_user', 'image', 'flavor']
 
+    DEFAULT_PROFILE = 'rhel7'
+
     def _default_config_options(self):
         self.config.add_section(self.section)
-        self.config.set(self.section, 'profile', self.profile)
+        self.config.set(self.section, 'profile', self.DEFAULT_PROFILE)
         self.config.set(self.section, 'name', self.name)
         self.config.set(self.section, 'forwarder',  self.forwarder)
-        self.config.set(self.section, 'public_network', self.public_network)
-        self.config.set(self.section, 'private_network', self.private_network)
 
         logging.warning("Writing new config section %s to %s",
                         self.section,
@@ -162,6 +162,16 @@ class Configuration(object):
 
             return default
 
+    def getboolean(self, name, default=False):
+        try:
+            return self.config.getboolean(self.section, name)
+        except ConfigParser.NoOptionError:
+            logging.debug("Option %s not in config file, using default: %s",
+                          name,
+                          default)
+
+            return default
+
     @property
     def profile(self):
         profile = self.get('profile', 'rhel7')
@@ -199,11 +209,11 @@ class Configuration(object):
 
     @property
     def public_network(self):
-        return self.config.getboolean(self.section, 'public_network')
+        return self.getboolean(self.section)
 
     @property
     def private_network(self):
-        return self.config.getboolean(self.section, 'private_network')
+        return self.getboolean(self.section)
 
 
 class Plan(object):
