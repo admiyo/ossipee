@@ -209,11 +209,11 @@ class Configuration(object):
 
     @property
     def public_network(self):
-        return self.getboolean(self.section)
+        return self.getboolean('public_network')
 
     @property
     def private_network(self):
-        return self.getboolean(self.section)
+        return self.getboolean('private_network')
 
 
 class Plan(object):
@@ -658,9 +658,6 @@ class NovaServer(WorkItem):
     def user_data_template(self):
         return user_data_template
 
-    def _pubkey(self):
-        return self.nova.keypairs.list()[0].id
-
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
             return
@@ -684,7 +681,7 @@ class NovaServer(WorkItem):
             min_cont=1,
             max_count=1,
             userdata=user_data,
-            key_name=self._pubkey(),
+            key_name=self.plan.key,
             availability_zone=None,
             block_device_mapping=None,
             scheduler_hints=None,
