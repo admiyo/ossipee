@@ -209,11 +209,11 @@ class Configuration(object):
 
     @property
     def public_network(self):
-        return self.getboolean(self.section)
+        return self.getboolean('public_network')
 
     @property
     def private_network(self):
-        return self.getboolean(self.section)
+        return self.getboolean('private_network')
 
 
 class Plan(object):
