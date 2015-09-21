@@ -201,7 +201,7 @@ class Configuration(object):
 
     @property
     def key(self):
-        return self.get('pubkey', self.name + '-pubkey')
+        return self.get('pubkey', None)
 
     @property
     def forwarder(self):
@@ -658,6 +658,9 @@ class NovaServer(WorkItem):
     def user_data_template(self):
         return user_data_template
 
+    def _keypair_name(self):
+        return self.plan.key or self.nova.keypairs.list()[0].id
+    
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
             return
@@ -667,6 +670,7 @@ class NovaServer(WorkItem):
             for network in self._networks_response(
                     self.build_network_name(net_name))['networks']:
                 nics.append({'net-id': network['id']})
+        
 
         security_groups = [self.plan.hosts[name]['security_group']]
         response = self.nova.servers.create(
@@ -681,7 +685,7 @@ class NovaServer(WorkItem):
             min_cont=1,
             max_count=1,
             userdata=user_data,
-            key_name=self.plan.key,
+            key_name=self._keypair_name(),
             availability_zone=None,
             block_device_mapping=None,
             scheduler_hints=None,
