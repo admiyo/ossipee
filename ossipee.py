@@ -930,10 +930,12 @@ class Inventory(FileWorkItem):
 class Rippowam(WorkItem):
 
     def create(self):
+
         process = subprocess.call(
             ['ansible-playbook', '-i',
              self.plan.inventory_file,
-             os.getenv('HOME') + '/devel/rippowam/site.yml'])
+             os.getenv('HOME') + '/devel/rippowam/site.yml'],
+            env={'ANSIBLE_SSH_PIPELINING': 'true'})
 
     def display(self):
         pass
@@ -1095,7 +1097,9 @@ class WorkerApplication(Application):
 
     worker_class = {
         'all': [all_networks, SecurityGroup,
-                AllServers, HostsEntries, Inventory],
+                AllServers, HostsEntries, Inventory,
+                lambda session, plan: UnrequireTTY(session, plan, 'tty')
+                ],
         'servers': [AllServers, HostsEntries, Inventory,
                     lambda session, plan: UnrequireTTY(session, plan, 'tty')
                     ],
