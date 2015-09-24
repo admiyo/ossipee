@@ -124,32 +124,21 @@ class Configuration(object):
         if not self.config.has_section(self.section):
             self._default_config_options()
 
-        self.security_ports = {
-            'openstack': {
-                'tcp': [
-                    22,  # SSH
-                    80, 443,  # Horizon
-                    5000, 35357,  # Keystone
-                    9191, 9292,  # Glance
-                    8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
-                    8776,  # Cinder
-                ]},
-            'ipa': {
-                'tcp': [
-                    22,  # SSH
-                    80, 443,  # HTTP
-                    389, 686,  # LDAP
-                    88, 464,  # Kerberos, kpasswd
-                    53,  # DNS
-                    123,  # NTP,
-                ],
-                'udp': [
-                    88, 464,  # Kerberos, kpasswd
-                    123,  # NTP
-                    53  # DNS
+        global_rule = {
+            'tcp': [
+                (1, 65535)
+            ],
+            'udp': [
+                (1, 65535)
+            ],
+            'icmp': [
+                -1
+            ]
+        }
 
-                ]
-            }
+        self.security_ports = {
+            'openstack': global_rule,
+            'ipa': global_rule,
         }
 
     def get(self, name, default=None):
@@ -627,11 +616,16 @@ class SecurityGroup(WorkItem):
             security_ports = self.plan.security_ports[group_name]
             for protocol, ports in security_ports.iteritems():
                 for port in ports:
+                    try:
+                        from_port, to_port = port
+                    except TypeError:
+                        from_port = to_port = port
+
                     self.nova.security_group_rules.create(
                         sec_group.id,
-                        from_port=port,
+                        from_port=from_port,
                         ip_protocol=protocol,
-                        to_port=port,
+                        to_port=to_port,
                         cidr='0.0.0.0/0')
         self.display()
 
