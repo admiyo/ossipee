@@ -124,32 +124,22 @@ class Configuration(object):
         if not self.config.has_section(self.section):
             self._default_config_options()
 
-        self.security_ports = {
-            'openstack': {
-                'tcp': [
-                    22,  # SSH
-                    80, 443,  # Horizon
-                    5000, 35357,  # Keystone
-                    9191, 9292,  # Glance
-                    8773, 8774, 8775, 3333, 6080, 5800, 5900,  # Nova
-                    8776,  # Cinder
-                ]},
-            'ipa': {
-                'tcp': [
-                    22,  # SSH
-                    80, 443,  # HTTP
-                    389, 686,  # LDAP
-                    88, 464,  # Kerberos, kpasswd
-                    53,  # DNS
-                    123,  # NTP,
-                ],
-                'udp': [
-                    88, 464,  # Kerberos, kpasswd
-                    123,  # NTP
-                    53  # DNS
+        global_rule = {
+            'tcp': [
+                (1, 65535)
+            ],
+            'udp': [
+                (1, 65535)
+            ],
+            'icmp': [
+                -1
+            ]
+        }
 
-                ]
-            }
+        self.security_ports = {
+            'openstack': global_rule,
+            'ipa': global_rule,
+            'satellite': global_rule
         }
 
     def get(self, name, default=None):
@@ -627,11 +617,16 @@ class SecurityGroup(WorkItem):
             security_ports = self.plan.security_ports[group_name]
             for protocol, ports in security_ports.iteritems():
                 for port in ports:
+                    try:
+                        from_port, to_port = port
+                    except TypeError:
+                        from_port = to_port = port
+
                     self.nova.security_group_rules.create(
                         sec_group.id,
-                        from_port=port,
+                        from_port=from_port,
                         ip_protocol=protocol,
-                        to_port=port,
+                        to_port=to_port,
                         cidr='0.0.0.0/0')
         self.display()
 
@@ -660,7 +655,7 @@ class NovaServer(WorkItem):
 
     def _keypair_name(self):
         return self.plan.key or self.nova.keypairs.list()[0].id
-    
+
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
             return
@@ -670,7 +665,7 @@ class NovaServer(WorkItem):
             for network in self._networks_response(
                     self.build_network_name(net_name))['networks']:
                 nics.append({'net-id': network['id']})
-        
+
 
         security_groups = [self.plan.hosts[name]['security_group']]
         response = self.nova.servers.create(
@@ -1062,7 +1057,7 @@ class Application(object):
     def plan(self):
         if not self._plan:
             self._plan = Plan(self.configuration, self.session)
-            for host in ['ipa', 'openstack']:
+            for host in ['ipa', 'openstack', 'satellite']:
                 self._plan.add_host(host)
 
         return self._plan
@@ -1094,6 +1089,12 @@ class WorkerApplication(Application):
         'openstack': [
             lambda session, plan: NovaServer(session, plan, 'openstack'),
             lambda session, plan: FloatIP(session, plan, 'openstack'),
+            HostsEntries,
+            Inventory
+        ],
+        'satellite': [
+            lambda session, plan: NovaServer(session, plan, 'satellite'),
+            lambda session, plan: FloatIP(session, plan, 'satellite'),
             HostsEntries,
             Inventory
         ],
