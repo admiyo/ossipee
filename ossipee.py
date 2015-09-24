@@ -139,6 +139,7 @@ class Configuration(object):
         self.security_ports = {
             'openstack': global_rule,
             'ipa': global_rule,
+            'satellite': global_rule
         }
 
     def get(self, name, default=None):
@@ -654,7 +655,7 @@ class NovaServer(WorkItem):
 
     def _keypair_name(self):
         return self.plan.key or self.nova.keypairs.list()[0].id
-    
+
     def _host(self, name, user_data):
         if len(self.nova.servers.list(search_opts={'name': self.fqdn()})) > 0:
             return
@@ -664,7 +665,7 @@ class NovaServer(WorkItem):
             for network in self._networks_response(
                     self.build_network_name(net_name))['networks']:
                 nics.append({'net-id': network['id']})
-        
+
 
         security_groups = [self.plan.hosts[name]['security_group']]
         response = self.nova.servers.create(
@@ -1056,7 +1057,7 @@ class Application(object):
     def plan(self):
         if not self._plan:
             self._plan = Plan(self.configuration, self.session)
-            for host in ['ipa', 'openstack']:
+            for host in ['ipa', 'openstack', 'satellite']:
                 self._plan.add_host(host)
 
         return self._plan
@@ -1088,6 +1089,12 @@ class WorkerApplication(Application):
         'openstack': [
             lambda session, plan: NovaServer(session, plan, 'openstack'),
             lambda session, plan: FloatIP(session, plan, 'openstack'),
+            HostsEntries,
+            Inventory
+        ],
+        'satellite': [
+            lambda session, plan: NovaServer(session, plan, 'satellite'),
+            lambda session, plan: FloatIP(session, plan, 'satellite'),
             HostsEntries,
             Inventory
         ],
