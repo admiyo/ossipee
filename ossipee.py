@@ -338,20 +338,26 @@ class WorkItem(object):
     def build_security_group_name(self, key):
         return "%s-%s" % (key, self.name)
 
+    def _reset_openssh(self, ip_address):
+        try:
+            subprocess.check_call(
+                ['ssh',
+                 '-o', 'StrictHostKeyChecking=no',
+                 '-o', 'PasswordAuthentication=no',
+                 '-l', self.plan.profile['cloud_user'],
+                 ip_address, 'hostname'])
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     def reset_ssh(self, ip_address):
         attempts = 5
         while(attempts):
-            try:
-                subprocess.check_call(
-                    ['ssh',
-                     '-o', 'StrictHostKeyChecking=no',
-                     '-o', 'PasswordAuthentication=no',
-                     '-l', self.plan.profile['cloud_user'],
-                     ip_address, 'hostname'])
+            if self._reset_openssh(ip_address):
                 attempts = 0
-            except subprocess.CalledProcessError:
+            else:
                 logging.info(
-                    'ssh to server failed.' +
+                    'openssh to server failed.' +
                     '  Waiting 5 seconds to retry %s.' % ip_address +
                     '  Attempts left = %d', attempts)
                 attempts = attempts - 1
@@ -666,7 +672,6 @@ class NovaServer(WorkItem):
                     self.build_network_name(net_name))['networks']:
                 nics.append({'net-id': network['id']})
 
-
         security_groups = [self.plan.hosts[name]['security_group']]
         response = self.nova.servers.create(
             self.fqdn(),
@@ -781,6 +786,24 @@ class HostsEntries(WorkItem):
             stdout=subprocess.PIPE)
         out, err = process.communicate()
         self.display()
+
+
+class UnrequireTTY(WorkItem):
+
+    def create(self):
+        args = "dest=/etc/sudoers  state=absent regexp='^Defaults(\s+)requiretty(\s*)$' validate='visudo -cf %s'"
+        process = subprocess.call(
+            ['ansible', '-i',
+             self.plan.inventory_file,
+             '--user', self.plan.profile['cloud_user'],  '--sudo', 'all',
+             '-m', 'lineinfile', '-a', args
+             ])
+
+    def display(self):
+        pass
+
+    def teardown(self):
+        pass
 
 
 class AllServers(WorkItem):
@@ -1073,7 +1096,9 @@ class WorkerApplication(Application):
     worker_class = {
         'all': [all_networks, SecurityGroup,
                 AllServers, HostsEntries, Inventory],
-        'servers': [AllServers, HostsEntries, Inventory],
+        'servers': [AllServers, HostsEntries, Inventory,
+                    lambda session, plan: UnrequireTTY(session, plan, 'tty')
+                    ],
         'controller': [
             lambda session, plan: NovaServer(session, plan, 'controller'),
             lambda session, plan: FloatIP(session, plan, 'controller'),
