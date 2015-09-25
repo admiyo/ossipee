@@ -26,7 +26,11 @@ user_data_template = '''
 #cloud-config
 hostname: %(fqdn)s
 fqdn:  %(fqdn)s
-
+write_files:
+-   path: /etc/sudoers.d/999-ansible-requiretty
+    permissions: 440
+    content: |
+        Defaults:%(cloud_user)s !requiretty
 '''
 
 # TODO(ayoung): These should be in the config file
@@ -715,7 +719,8 @@ class NovaServer(WorkItem):
             'hostname': self.name,
             'fqdn': self.fqdn(),
             'realm': realm,
-            'domain': self.plan.domain_name
+            'domain': self.plan.domain_name,
+            'cloud_user': self.plan.profile['cloud_user']
         }
         return data
 
@@ -786,24 +791,6 @@ class HostsEntries(WorkItem):
             stdout=subprocess.PIPE)
         out, err = process.communicate()
         self.display()
-
-
-class UnrequireTTY(WorkItem):
-
-    def create(self):
-        args = "dest=/etc/sudoers  state=absent regexp='^Defaults(\s+)requiretty(\s*)$' validate='visudo -cf %s'"
-        process = subprocess.call(
-            ['ansible', '-i',
-             self.plan.inventory_file,
-             '--user', self.plan.profile['cloud_user'],  '--sudo', 'all',
-             '-m', 'lineinfile', '-a', args
-             ])
-
-    def display(self):
-        pass
-
-    def teardown(self):
-        pass
 
 
 class AllServers(WorkItem):
@@ -934,8 +921,7 @@ class Rippowam(WorkItem):
         process = subprocess.call(
             ['ansible-playbook', '-i',
              self.plan.inventory_file,
-             os.getenv('HOME') + '/devel/rippowam/site.yml'],
-            env={'ANSIBLE_SSH_PIPELINING': 'true'})
+             os.getenv('HOME') + '/devel/rippowam/site.yml'])
 
     def display(self):
         pass
@@ -1097,12 +1083,8 @@ class WorkerApplication(Application):
 
     worker_class = {
         'all': [all_networks, SecurityGroup,
-                AllServers, HostsEntries, Inventory,
-                lambda session, plan: UnrequireTTY(session, plan, 'tty')
-                ],
-        'servers': [AllServers, HostsEntries, Inventory,
-                    lambda session, plan: UnrequireTTY(session, plan, 'tty')
-                    ],
+                AllServers, HostsEntries, Inventory],
+        'servers': [AllServers, HostsEntries, Inventory],
         'controller': [
             lambda session, plan: NovaServer(session, plan, 'controller'),
             lambda session, plan: FloatIP(session, plan, 'controller'),
