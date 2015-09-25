@@ -141,9 +141,7 @@ class Configuration(object):
         }
 
         self.security_ports = {
-            'openstack': global_rule,
-            'ipa': global_rule,
-            'satellite': global_rule
+            'all-open': global_rule,
         }
 
     def get(self, name, default=None):
@@ -272,7 +270,7 @@ class Plan(object):
             print ('host %s already exists.' % name)
             return
         self.hosts[name] = self._get_client_vars()
-        self.hosts[name]['security_group'] = "%s-%s" % (self.name, name)
+        self.hosts[name]['security_group'] = "%s-%s" % (self.name, 'all-open')
 
 
 class WorkItem(object):
