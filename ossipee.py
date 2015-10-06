@@ -357,6 +357,7 @@ class WorkItem(object):
         while(attempts):
             if self._reset_openssh(ip_address):
                 attempts = 0
+                return
             else:
                 logging.info(
                     'openssh to server failed.' +
@@ -364,20 +365,25 @@ class WorkItem(object):
                     '  Attempts left = %d', attempts)
                 attempts = attempts - 1
                 time.sleep(5)
+        raise IOError("Cannot SSH to host")
 
     def wait_for_destruction(self, host_id):
         attempts = 5
-        while attempts > 0:
+        while True:
             try:
                 host = self.nova.servers.get(host_id)
                 attempts = attempts - 1
-                logging.info(
-                    'Teardown of host not completed. ' +
-                    'Waiting 5 second to check again.' +
-                    'Remaining attempts = %d' % attempts)
-                time.sleep(5)
+                if attempts > 0:
+                    logging.info(
+                        'Teardown of host not completed. ' +
+                        'Waiting 5 second to check again.' +
+                        'Remaining attempts = %d' % attempts)
+                    time.sleep(5)
+                else:
+                    logging.info('Teardown of host not completed.')
+                    break
             except Exception:
-                break
+                return
 
     def __init__(self, session, plan, name):
         self.name = name
