@@ -207,6 +207,11 @@ class Configuration(object):
     def private_network(self):
         return self.getboolean('private_network')
 
+    @property
+    def ansible_playbook(self):
+        return self.get('ansible_playbook',
+                        os.getenv('HOME') + '/devel/rippowam/site.yml')
+
 
 class Plan(object):
 
@@ -233,6 +238,7 @@ class Plan(object):
         self.deployment_dir = (self.deployments_dir +
                                '/' + name + '.' + self.cloud)
         self.inventory_file = self.deployment_dir + '/inventory.ini'
+        self.ansible_playbook = self.configuration.ansible_playbook
 
         self.networks = dict()
         cidr_template = '192.168.%d.0/24'
@@ -918,14 +924,13 @@ class Inventory(FileWorkItem):
             f.write('%s=%s\n' % (key, value))
 
 
-class Rippowam(WorkItem):
+class AnsiblePlaybook(WorkItem):
 
     def create(self):
 
         process = subprocess.call(
-            ['ansible-playbook', '-i',
-             self.plan.inventory_file,
-             os.getenv('HOME') + '/devel/rippowam/site.yml'])
+            ['ansible-playbook', '-i', self.plan.inventory_file,
+             self.plan.ansible_playbook])
 
     def display(self):
         pass
@@ -1116,8 +1121,12 @@ class WorkerApplication(Application):
         'network': [all_networks],
         'inventory': [Inventory],
         'rippowam': [
-            lambda session, plan: Rippowam(session, plan, 'controller')
+            lambda session, plan: AnsiblePlaybook(session, plan, 'controller')
         ],
+        'ansible': [
+            lambda session, plan: AnsiblePlaybook(session, plan, 'controller')
+        ],
+
         'security_group': [SecurityGroup],
         'hosts_entries': [HostsEntries]
     }
