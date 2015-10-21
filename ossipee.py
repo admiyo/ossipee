@@ -38,6 +38,7 @@ CLOUD_AUTH_URLS = {
     'http://controller.oslab.openstack.engineering.redhat.com:5000/v3':
     'oslab',
     'http://control.os1.phx2.redhat.com:5000/v3/': 'os1',
+    'http://openstack.demorack.lab.eng.rdu.redhat.com:5000/v3':'demorack',
     'https://keystone.dream.io/v3': 'dreamcompute'
 }
 
