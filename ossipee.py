@@ -1078,7 +1078,8 @@ class Application(object):
     def plan(self):
         if not self._plan:
             self._plan = Plan(self.configuration, self.session)
-            for host in ['ipa', 'openstack', 'satellite']:
+            #TODO add  'satellite'
+            for host in ['ipa', 'openstack', 'keycloak']:
                 self._plan.add_host(host)
 
         return self._plan
@@ -1089,45 +1090,34 @@ class Application(object):
 
 class WorkerApplication(Application):
 
+    def _host_worker(name):
+        return [
+            lambda session, plan: NovaServer(session, plan, name),
+            lambda session, plan: FloatIP(session, plan, name),
+            HostsEntries,
+            Inventory
+        ]
+
+    def _ansible_playbook(name):
+        return [
+            lambda session, plan: AnsiblePlaybook(session, plan, name)
+        ]
+
     description = 'Display the state of the system.'
 
     worker_class = {
         'all': [all_networks, SecurityGroup,
                 AllServers, HostsEntries, Inventory],
         'servers': [AllServers, HostsEntries, Inventory],
-        'controller': [
-            lambda session, plan: NovaServer(session, plan, 'controller'),
-            lambda session, plan: FloatIP(session, plan, 'controller'),
-            HostsEntries,
-            Inventory
-        ],
-        'ipa': [
-            lambda session, plan: NovaServer(session, plan, 'ipa'),
-            lambda session, plan: FloatIP(session, plan, 'ipa'),
-            HostsEntries,
-            Inventory
-        ],
-        'openstack': [
-            lambda session, plan: NovaServer(session, plan, 'openstack'),
-            lambda session, plan: FloatIP(session, plan, 'openstack'),
-            HostsEntries,
-            Inventory
-        ],
-        'satellite': [
-            lambda session, plan: NovaServer(session, plan, 'satellite'),
-            lambda session, plan: FloatIP(session, plan, 'satellite'),
-            HostsEntries,
-            Inventory
-        ],
+        'controller': _host_worker('controller'),
+        'ipa': _host_worker('ipa'),
+        'openstack': _host_worker('openstack'),
+        'keycloak': _host_worker('keycloak'),
+        'satellite': _host_worker('satellite'),
         'network': [all_networks],
         'inventory': [Inventory],
-        'rippowam': [
-            lambda session, plan: AnsiblePlaybook(session, plan, 'controller')
-        ],
-        'ansible': [
-            lambda session, plan: AnsiblePlaybook(session, plan, 'controller')
-        ],
-
+        'rippowam': _ansible_playbook('controller'),
+        'ansible': _ansible_playbook('controller'),
         'security_group': [SecurityGroup],
         'hosts_entries': [HostsEntries]
     }
