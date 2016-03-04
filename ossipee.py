@@ -197,6 +197,10 @@ class Configuration(object):
         return self.get('pubkey', None)
 
     @property
+    def domain_name(self):
+        return self.get('domain_name', None)
+
+    @property
     def forwarder(self):
         return self.get('forwarder', '192.168.52.3')
 
@@ -234,7 +238,10 @@ class Plan(object):
         self.profile = self.configuration.profile
         self.cloud = CLOUD_AUTH_URLS.get(session.auth.auth_url, 'unknown')
 
-        self.domain_name = name + '.' + self.cloud + '.test'
+        if configuration.domain_name:
+            self.domain_name = configuration.domain_name
+        else:
+            self.domain_name = name + '.' + self.cloud + '.test'
         self.deployments_dir = self.configuration.config_dir + '/deployments'
         self.deployment_dir = (self.deployments_dir +
                                '/' + name + '.' + self.cloud)
