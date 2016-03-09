@@ -5,6 +5,7 @@ from keystoneclient import auth as ksc_auth
 from keystoneclient import session as ksc_session
 from novaclient import client as novaclient
 
+
 def session_factory():
     parser = argparse.ArgumentParser(description="")
     ksc_session.Session.register_cli_options(parser)
@@ -18,6 +19,7 @@ def session_factory():
         auth=auth_plugin)
     return session
 
+
 class ServerInventory(object):
     def do(self):
         nova = novaclient.Client('2', session=session_factory())
@@ -29,7 +31,7 @@ class ServerInventory(object):
             if server.name == 'ipa':
                 print("cloud_user=centos")
             else:
-                 print("cloud_user=heat-admin")
+                print("cloud_user=heat-admin")
             print("ipa_server_password=FreeIPA4All")
             print("ipa_domain=ayoung.dellt1700.test")
             print("ipa_forwarder=192.168.122.1")
@@ -37,6 +39,7 @@ class ServerInventory(object):
             print("ipa_nova_join=False")
             print("nameserver=192.168.52.4")
             print("")
+
 
 def main():
     inv = ServerInventory()
