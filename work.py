@@ -379,7 +379,7 @@ class Network(object):
             self.neutron.delete_network(network['id'])
 
 
-class NovaServer(object):
+class Server(object):
     def __init__(self, nova, neutron, spec):
         self.name = spec.name
         self.nova = nova

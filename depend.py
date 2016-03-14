@@ -37,8 +37,8 @@ class Scope(object):
     def __init__(self, name, parent=None):
         self.name = name
         self.parent = parent
-        proxy_map = dict()
-        scope_map[self.name] = proxy_map
+        self.proxy_map = dict()
+        scope_map[self.name] = self.proxy_map
 
 scope_map = {}
 GLOBAL_SCOPE = Scope("Global")

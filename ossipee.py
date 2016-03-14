@@ -45,7 +45,7 @@ def all_servers_factory(resolver):
     plan = resolver.resolve(planning.Plan)
     domain_name = plan.domain_name
     servers = depend.WorkItemList(
-        [resolver.resolve_named(work.NovaServer, server_name)
+        [resolver.resolve_named(work.Server, server_name)
          for server_name in plan.hosts],
         resolver, False)
     float_ips = depend.WorkItemList(
@@ -85,7 +85,7 @@ def hosts_entries_factory(resolver):
 
 def host_worker_factory(resolver, name):
     work_items = [
-        work.NovaServer,
+        work.Server,
         work.FloatIP,
         work.HostsEntries,
         work.Inventory
@@ -129,7 +129,7 @@ def nova_server_factory(resolver, name):
     neutron = resolver.resolve(neutronclient.Client)
     plan = resolver.resolve(planning.Plan)
     spec = plan.hosts[name]
-    return work.NovaServer(nova, neutron, spec)
+    return work.Server(nova, neutron, spec)
 
 
 def parser_factory(resolver):
@@ -236,7 +236,19 @@ class WorkerApplication(object):
     def display(self, *args, **kwargs):
         return self.work_item_list.display(*args, **kwargs)
 
-
+    def list(self,  *args, **kwargs):
+        def list_registered(clazz):
+            worker_keys = []
+            for proxy_key in depend.GLOBAL_SCOPE.proxy_map:
+                try:
+                    isinstance(depend.WorkItemList, proxy_key[0])
+                except TypeError:
+                    continue
+                worker_keys.append(proxy_key[1])
+            print(sorted(worker_keys))
+                    
+        list_registered(depend.WorkItemList)
+    
 # So, we can lie.  Since Python is not strictly typed,
 # we do not need to return an actual instance of a class,
 # but rather a component that conforms to the same
@@ -286,7 +298,7 @@ depend.register(work.RouterInterface, router_interface_factory)
 depend.register(work.SecurityGroup, security_group_factory)
 
 depend.register(work.FloatIP, float_ip_factory)
-depend.register(work.NovaServer, nova_server_factory)
+depend.register(work.Server, nova_server_factory)
 depend.register(work.AllServers, all_servers_factory)
 
 depend.register(work.HostsEntries, hosts_entries_factory)
