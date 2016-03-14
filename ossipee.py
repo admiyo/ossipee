@@ -21,6 +21,88 @@ import planning
 import work
 
 
+def all_items_factory(resolver, name):
+    all = [(depend.WorkItemList, 'networks'),
+           work.SecurityGroup,
+           work.AllServers,
+           work.HostsEntries,
+           work.Inventory]
+    return depend.UnnamedComponentList(resolver, all)
+
+
+def all_networks_factory(resolver):
+    plan = resolver.resolve(planning.Plan)
+    components = list()
+    if plan.public_network:
+        components.append((depend.WorkItemList, 'public-network'))
+    if plan.private_network:
+        components.append((depend.WorkItemList, 'private-network'))
+    return depend.UnnamedComponentList(resolver, components)
+
+
+def all_servers_factory(resolver):
+    nova = resolver.resolve(novaclient.Client)
+    plan = resolver.resolve(planning.Plan)
+    domain_name = plan.domain_name
+    servers = depend.WorkItemList(
+        [resolver.resolve_named(work.NovaServer, server_name)
+         for server_name in plan.hosts],
+        resolver, False)
+    float_ips = depend.WorkItemList(
+        [resolver.resolve_named(work.FloatIP, server_name)
+         for server_name in plan.hosts], resolver, False)
+
+    return work.AllServers(nova, domain_name, servers, float_ips)
+
+
+def anisble_playbook_factory(resolver, name):
+    plan = resolver.resolve(planning.Plan)
+    return work.AnsiblePlaybook(plan.inventory_file, plan.ansible_playbook)
+
+
+def args_factory(resolver):
+    parser = resolver.resolve(argparse.ArgumentParser)
+    args = parser.parse_args()
+    return args
+
+
+def float_ip_factory(resolver, name):
+    plan = resolver.resolve(planning.Plan)
+    fqdn = plan.make_fqdn(name)
+    cloud_user = plan.profile['cloud_user']
+    nova = resolver.resolve(novaclient.Client)
+    return work.FloatIP(nova, fqdn, cloud_user)
+
+
+def hosts_entries_factory(resolver):
+    nova = resolver.resolve(novaclient.Client)
+    plan = resolver.resolve(planning.Plan)
+    hosts = plan.hosts.values()
+    cloud_user = plan.profile['cloud_user']
+    domain_name = plan.domain_name
+    return work.HostsEntries(resolver, nova, hosts, cloud_user, domain_name)
+
+
+def host_worker_factory(resolver, name):
+    work_items = [
+        work.NovaServer,
+        work.FloatIP,
+        work.HostsEntries,
+        work.Inventory
+    ]
+    return depend.NamedComponentList(resolver, work_items, name)
+
+
+def inventory_factory(resolver):
+    plan = resolver.resolve(planning.Plan)
+    nova = resolver.resolve(novaclient.Client)
+    directory = plan.deployment_dir
+    hosts = plan.hosts
+    ipa_vars = plan.ipa_client_vars
+    inventory_file = plan.inventory_file
+    return work.Inventory(nova, inventory_file, directory, hosts, ipa_vars)
+
+
 def network_factory(resolver, name):
     neutron = resolver.resolve(neutronclient.Client)
     plan = resolver.resolve(planning.Plan)
@@ -28,44 +110,51 @@ def network_factory(resolver, name):
     return work.Network(neutron, network_name)
 
 
-def subnet_factory(resolver, name):
+def neutron_client_factory(resolver):
+    session = resolver.resolve(ksc_session.Session)
+    neutron = neutronclient.Client('2.0', session=session)
+    neutron.format = 'json'
+    return neutron
+
+
+def nova_client_factory(resolver):
+    session = resolver.resolve(ksc_session.Session)
+    nova_client = novaclient.Client('2', session=session)
+    return nova_client
+
+
+# TODO: this needs to be named.  It is just a server, not *the* nova server
+def nova_server_factory(resolver, name):
+    nova = resolver.resolve(novaclient.Client)
     neutron = resolver.resolve(neutronclient.Client)
     plan = resolver.resolve(planning.Plan)
-    network_name = plan.build_network_name(name)
-    cidr = plan.networks[name]['cidr']
-    subnet_name = plan.subnet_name(name)
-    return work.SubNet(neutron, name, network_name, cidr, subnet_name)
+    spec = plan.hosts[name]
+    return work.NovaServer(nova, neutron, spec)
 
 
-def network_components(resolver, name):
-    plan = resolver.resolve(planning.Plan)
-    networks = dict()
-    if plan.public_network:
-        networks['public'] = {
-            'components': [work.Router,
-                           work.Network,
-                           work.SubNet,
-                           work.RouterInterface],
-        }
-    if plan.private_network:
-        networks['private'] = {
-            'components': [work.Network, work.SubNet],
-        }
-    work_items = networks[name]['components']
-    return depend.NamedComponentList(resolver, work_items, name)
+def parser_factory(resolver):
+    parser = argparse.ArgumentParser(description='')
+    ksc_session.Session.register_cli_options(parser)
+    ksc_auth.register_argparse_arguments(parser,
+                                         sys.argv,
+                                         default='v3password')
+    parser.add_argument('-s', '--section',
+                        dest='section',
+                        default='scope')
+    parser.add_argument('worker', nargs='?', default='all',
+                        help='Worker to execute, defaults to "all"')
+
+    return parser
 
 
-# TODO: rename this a factory, and don't rebuild the networks dictionary above
-# but rather register each network as a subclass
-def all_networks_factory(resolver):
-    plan = resolver.resolve(planning.Plan)
-    return depend.WorkItemList([network_components(resolver, network)
-                                for network in plan.networks.keys()],
-                               resolver, False)
-
-
-def enable_logging():
-    logging.basicConfig(level=logging.DEBUG)
+def plan_factory(resolver):
+    parser = resolver.resolve(argparse.ArgumentParser)
+    args = parser.parse_args()
+    session = resolver.resolve(ksc_session.Session)
+    plan = planning.Plan(args.section, session)
+    for host in ['ipa', 'openstack', 'keycloak']:
+        plan.add_host(host)
+    return plan
 
 
 def router_factory(resolver, name):
@@ -84,46 +173,17 @@ def router_interface_factory(resolver, name):
     return work.RouterInterface(neutron, name, router_name, subnet_name)
 
 
-def neutron_client_factory(resolver):
-    session = resolver.resolve(ksc_session.Session)
-    neutron = neutronclient.Client('2.0', session=session)
-    neutron.format = 'json'
-    return neutron
-
-
-def float_ip_factory(resolver, name):
-    plan = resolver.resolve(planning.Plan)
-    fqdn = plan.make_fqdn(name)
-    cloud_user = plan.profile['cloud_user']
+def security_group_factory(resolver):
     nova = resolver.resolve(novaclient.Client)
-    return work.FloatIP(nova, fqdn, cloud_user)
-
-
-def nova_client_factory(resolver):
-    session = resolver.resolve(ksc_session.Session)
-    nova_client = novaclient.Client('2', session=session)
-    return nova_client
-
-
-def parser_factory(resolver):
-    parser = argparse.ArgumentParser(description='')
-    ksc_session.Session.register_cli_options(parser)
-    ksc_auth.register_argparse_arguments(parser,
-                                         sys.argv,
-                                         default='v3password')
-    parser.add_argument('-s', '--section',
-                        dest='section',
-                        default='scope')
-    parser.add_argument('worker', nargs='?', default='all',
-                        help='Worker to execute, defaults to "all"')
-
-    return parser
-
-
-def args_factory(resolver):
-    parser = resolver.resolve(argparse.ArgumentParser)
-    args = parser.parse_args()
-    return args
+    neutron = resolver.resolve(neutronclient.Client)
+    plan = resolver.resolve(planning.Plan)
+    security_groups = []
+    security_ports = {}
+    for group, ports in plan.security_ports.iteritems():
+        sec_group = "%s-%s" % (plan.name, group)
+        security_groups.append(sec_group)
+        security_ports[sec_group] = ports
+    return work.SecurityGroup(nova, neutron, security_groups, security_ports)
 
 
 def session_factory(resolver):
@@ -143,98 +203,22 @@ def session_factory(resolver):
     return session
 
 
-def plan_factory(resolver):
-    parser = resolver.resolve(argparse.ArgumentParser)
-    args = parser.parse_args()
-    session = resolver.resolve(ksc_session.Session)
-    plan = planning.Plan(args.section, session)
-    for host in ['ipa', 'openstack', 'keycloak']:
-        plan.add_host(host)
-    return plan
-
-
 def worker_factory(resolver):
     args = resolver.resolve("args")
     return args.worker
 
 
-def security_group_factory(resolver):
-    nova = resolver.resolve(novaclient.Client)
+def subnet_factory(resolver, name):
     neutron = resolver.resolve(neutronclient.Client)
     plan = resolver.resolve(planning.Plan)
-    security_groups = []
-    security_ports = {}
-    for group, ports in plan.security_ports.iteritems():
-        sec_group = "%s-%s" % (plan.name, group)
-        security_groups.append(sec_group)
-        security_ports[sec_group] = ports
-    return work.SecurityGroup(nova, neutron, security_groups, security_ports)
+    network_name = plan.build_network_name(name)
+    cidr = plan.networks[name]['cidr']
+    subnet_name = plan.subnet_name(name)
+    return work.SubNet(neutron, name, network_name, cidr, subnet_name)
 
 
-def anisble_playbook_factory(resolver, name):
-    plan = resolver.resolve(planning.Plan)
-    return work.AnsiblePlaybook(plan.inventory_file, plan.ansible_playbook)
-
-
-def hosts_entries_factory(resolver):
-    nova = resolver.resolve(novaclient.Client)
-    plan = resolver.resolve(planning.Plan)
-    hosts = plan.hosts.values()
-    cloud_user = plan.profile['cloud_user']
-    domain_name = plan.domain_name
-    return work.HostsEntries(resolver, nova, hosts, cloud_user, domain_name)
-
-
-def inventory_factory(resolver):
-    plan = resolver.resolve(planning.Plan)
-    nova = resolver.resolve(novaclient.Client)
-    directory = plan.deployment_dir
-    hosts = plan.hosts
-    ipa_vars = plan.ipa_client_vars
-    inventory_file = plan.inventory_file
-    return work.Inventory(nova, inventory_file, directory, hosts, ipa_vars)
-
-
-def all_items_factory(resolver, name):
-    all = [(depend.WorkItemList, 'networks'),
-           work.SecurityGroup,
-           work.AllServers,
-           work.HostsEntries,
-           work.Inventory]
-    return depend.UnnamedComponentList(resolver, all)
-
-
-def all_servers_factory(resolver):
-    nova = resolver.resolve(novaclient.Client)
-    plan = resolver.resolve(planning.Plan)
-    domain_name = plan.domain_name
-    servers = depend.WorkItemList(
-        [resolver.resolve_named(work.NovaServer, server_name)
-         for server_name in plan.hosts],
-        resolver, False)
-    float_ips = depend.WorkItemList(
-        [resolver.resolve_named(work.FloatIP, server_name)
-         for server_name in plan.hosts], resolver, False)
-
-    return work.AllServers(nova, domain_name, servers, float_ips)
-
-
-def host_worker_factory(resolver, name):
-    work_items = [
-        work.NovaServer,
-        work.FloatIP,
-        work.HostsEntries,
-        work.Inventory
-    ]
-    return depend.NamedComponentList(resolver, work_items, name)
-
-
-def nova_server_factory(resolver, name):
-    nova = resolver.resolve(novaclient.Client)
-    neutron = resolver.resolve(neutronclient.Client)
-    plan = resolver.resolve(planning.Plan)
-    spec = plan.hosts[name]
-    return work.NovaServer(nova, neutron, spec)
+def enable_logging():
+    logging.basicConfig(level=logging.DEBUG)
 
 
 class WorkerApplication(object):
