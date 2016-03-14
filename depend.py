@@ -4,6 +4,7 @@ Copyright Adam Young  2012-2016
 '''
 
 import logging
+from keystoneclient.openstack.common.apiclient import exceptions
 
 
 """
