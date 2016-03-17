@@ -150,6 +150,9 @@ class Plan(object):
 
         self.ipa_client_vars = self._get_client_vars()
         self.hosts = {}
+        for host in self.host_names:
+            self.add_host(host)
+
 
     def build_network_name(self,  key):
         return self.name + '-' + key + '-net'
@@ -213,6 +216,14 @@ class Plan(object):
     def forwarder(self):
         return self.get('forwarder', '192.168.52.3')
 
+    @property
+    def host_names(self):
+        names = [name.strip()
+                 for name in self.get('host_names',
+                                      'ipa, openstack, keycloak').split(',')]
+        return names
+
+    
     @property
     def public_network(self):
         return self.getboolean('public_network')

@@ -152,8 +152,6 @@ def plan_factory(resolver):
     args = parser.parse_args()
     session = resolver.resolve(ksc_session.Session)
     plan = planning.Plan(args.section, session)
-    for host in ['ipa', 'openstack', 'keycloak']:
-        plan.add_host(host)
     return plan
 
 

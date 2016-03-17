@@ -15,6 +15,8 @@ import depend
 
 
 def get_server_by_name(nova, name):
+    logging.info("get_server_by_name :%s:" % name)
+
     servers = nova.servers.list(
         search_opts={'name': '^' + name + '$'})
     return servers[0]
