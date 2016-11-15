@@ -30,7 +30,7 @@ def all_items_factory(resolver, name):
     return depend.UnnamedComponentList(resolver, all)
 
 
-def all_networks_factory(resolver):
+def all_networks_factory(resolver, name=None):
     plan = resolver.resolve(planning.Plan)
     components = list()
     if plan.public_network:
@@ -40,7 +40,7 @@ def all_networks_factory(resolver):
     return depend.UnnamedComponentList(resolver, components)
 
 
-def all_servers_factory(resolver):
+def all_servers_factory(resolver, name=None):
     nova = resolver.resolve(novaclient.Client)
     plan = resolver.resolve(planning.Plan)
     domain_name = plan.domain_name
@@ -74,7 +74,7 @@ def float_ip_factory(resolver, name):
     return work.FloatIP(nova, fqdn, cloud_user)
 
 
-def hosts_entries_factory(resolver):
+def hosts_entries_factory(resolver, name=None):
     nova = resolver.resolve(novaclient.Client)
     plan = resolver.resolve(planning.Plan)
     hosts = plan.hosts.values()
@@ -93,7 +93,7 @@ def host_worker_factory(resolver, name):
     return depend.NamedComponentList(resolver, work_items, name)
 
 
-def inventory_factory(resolver):
+def inventory_factory(resolver, name=None):
     plan = resolver.resolve(planning.Plan)
     nova = resolver.resolve(novaclient.Client)
     directory = plan.deployment_dir
@@ -110,14 +110,14 @@ def network_factory(resolver, name):
     return work.Network(neutron, network_name)
 
 
-def neutron_client_factory(resolver):
+def neutron_client_factory(resolver, name=None):
     session = resolver.resolve(ksc_session.Session)
     neutron = neutronclient.Client('2.0', session=session)
     neutron.format = 'json'
     return neutron
 
 
-def nova_client_factory(resolver):
+def nova_client_factory(resolver, name=None):
     session = resolver.resolve(ksc_session.Session)
     nova_client = novaclient.Client('2', session=session)
     return nova_client
@@ -132,7 +132,7 @@ def nova_server_factory(resolver, name):
     return work.Server(nova, neutron, spec)
 
 
-def parser_factory(resolver):
+def parser_factory(resolver, name=None):
     parser = argparse.ArgumentParser(description='')
     ksc_session.Session.register_cli_options(parser)
     ksc_auth.register_argparse_arguments(parser,
@@ -147,7 +147,7 @@ def parser_factory(resolver):
     return parser
 
 
-def plan_factory(resolver):
+def plan_factory(resolver, name=None):
     parser = resolver.resolve(argparse.ArgumentParser)
     args = parser.parse_args()
     session = resolver.resolve(ksc_session.Session)
@@ -171,7 +171,7 @@ def router_interface_factory(resolver, name):
     return work.RouterInterface(neutron, name, router_name, subnet_name)
 
 
-def security_group_factory(resolver):
+def security_group_factory(resolver, name=None):
     nova = resolver.resolve(novaclient.Client)
     neutron = resolver.resolve(neutronclient.Client)
     plan = resolver.resolve(planning.Plan)
@@ -184,7 +184,7 @@ def security_group_factory(resolver):
     return work.SecurityGroup(nova, neutron, security_groups, security_ports)
 
 
-def session_factory(resolver):
+def session_factory(resolver, name=None):
     parser = resolver.resolve(argparse.ArgumentParser)
     args = parser.parse_args()
     auth_plugin = ksc_auth.load_from_argparse_arguments(args)
@@ -201,7 +201,7 @@ def session_factory(resolver):
     return session
 
 
-def worker_factory(resolver):
+def worker_factory(resolver, name=None):
     args = resolver.resolve("args")
     return args.worker
 

@@ -99,8 +99,8 @@ class Resolver(object):
             # To be nice to the factory writers, we let them decided.
             try:
                 inst = factory(self, name)
-            except TypeError:
-                inst = factory(self)
+            except TypeError as b:
+                inst = factory(self, name)
             self.instances[(clazz, name)] = inst
             return inst
         elif clazz in self.factories:

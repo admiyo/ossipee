@@ -324,8 +324,13 @@ class Inventory(FileWorkItem):
         return nameserver
 
     def write_contents(self, f):
-        ipa_server = get_server_by_name(self.nova, self.hosts['ipa'].fqdn)
-        nameserver = self._get_nameserver_address(ipa_server)
+        nameserver = None
+        try:
+            ipa_server = get_server_by_name(self.nova, self.hosts['ipa'].fqdn)
+            nameserver = self._get_nameserver_address(ipa_server)
+        except KeyError:
+            pass
+
         ipa_clients = []
         for host, vars in self.hosts.iteritems():
             try:
@@ -336,7 +341,8 @@ class Inventory(FileWorkItem):
                 f.write('[%s:vars]\n' % host)
                 for key, value in vars.client_vars.iteritems():
                     f.write('%s=%s\n' % (key, value))
-                f.write('%s=%s\n' % ('nameserver',  nameserver))
+                if nameserver:
+                    f.write('%s=%s\n' % ('nameserver',  nameserver))
                 f.write('\n')
 
                 if not host == 'ipa':
