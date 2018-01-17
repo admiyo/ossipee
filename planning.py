@@ -1,7 +1,7 @@
 import logging
 import os
 
-import ConfigParser
+import configparser as ConfigParser
 
 
 # TODO(ayoung): These should be in the config file
@@ -87,11 +87,11 @@ class Plan(object):
         with open(self.profile_file, 'w') as f:
             self.profiles.write(f)
 
-    def __init__(self, section, session):
+    def __init__(self, section, auth_url):
         self.section = section
         self.config = ConfigParser.SafeConfigParser()
         self.profiles = ConfigParser.SafeConfigParser()
-        self.cloud = CLOUD_AUTH_URLS.get(session.auth.auth_url, 'unknown')
+        self.cloud = CLOUD_AUTH_URLS.get(auth_url, 'unknown')
 
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
@@ -119,7 +119,7 @@ class Plan(object):
                 (1, 65535)
             ],
             'icmp': [
-                -1
+                0
             ]
         }
 
@@ -130,7 +130,7 @@ class Plan(object):
         configuration = self
         name = self.name
 
-        self.cloud = CLOUD_AUTH_URLS.get(session.auth.auth_url, 'unknown')
+        self.cloud = CLOUD_AUTH_URLS.get(auth_url, 'unknown')
         self.deployments_dir = self.config_dir + '/deployments'
         self.deployment_dir = (self.deployments_dir +
                                '/' + name + '.' + self.cloud)

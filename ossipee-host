@@ -18,11 +18,9 @@ class App(ossipee.Application):
     def create_host(self):
         self.plan.add_host(self.args.host)
         self.build_work_item_list([
-            lambda session, plan: ossipee.NovaServer(session,
-                                                     plan,
+            lambda session, plan: ossipee.NovaServer(plan,
                                                      self.args.host),
-            lambda session, plan: ossipee.FloatIP(session,
-                                                  plan,
+            lambda session, plan: ossipee.FloatIP(plan,
                                                   self.args.host),
             ossipee.Inventory
         ]).create()

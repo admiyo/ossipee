@@ -7,7 +7,7 @@ from neutronclient.neutron import client as neutronclient
 from neutronclient.common import exceptions as neutron_exceptions
 
 from keystoneclient.v3 import client as keystone_v3
-from keystoneclient.openstack.common.apiclient import exceptions
+from osc_lib  import exceptions
 from novaclient import client as novaclient
 from novaclient import exceptions as nova_exceptions
 
@@ -23,6 +23,7 @@ def get_server_by_name(nova, name):
 
 
 def calculate_address_for_server(server):
+
     ip_address = None
     for _, address in server.addresses.iteritems():
         for interface in address:
@@ -180,51 +181,74 @@ class FileWorkItem(object):
 
 
 class FloatIP(object):
-    def __init__(self, nova, fqdn, cloud_user):
+    def __init__(self, nova, neutron, fqdn, cloud_user):
         self.nova = nova
+        self.neutron = neutron
         self.fqdn = fqdn
         self.cloud_user = cloud_user
 
     def next_float_ip(self):
-        ip_list = self.nova.floating_ips.list()
-        for float in ip_list:
-            if float.instance_id is None:
-                return float
+        ip_list = self.neutron.list_floatingips()['floatingips']
+        for floatip in ip_list:
+            if floatip['port_id'] is None:
+                return floatip
         return None
 
-    def assign_next_ip(self, server):
+    def assign_next_ip(self, port_id):
         try:
-            float = self.next_float_ip()
-            logging.info(' Assigning %s to host id %s' % (float.ip, server.id))
-            server.add_floating_ip(float.ip)
+            floatip = self.next_float_ip()
+
+            logging.info(' Assigning %s to port  %s' % (
+                floatip['floating_ip_address'], port_id))
+            request = {
+                'port_id': port_id,
+            }
+            resp = self.neutron.update_floatingip(
+                floatip['id'],  {"floatingip": request})
+            logging.info(resp)
+
+
         except nova_exceptions.BadRequest:
             logging.info('IP assign failed. Waiting 5 seconds to try again.')
             time.sleep(5)
-            server.add_floating_ip(float.ip)
+            server.add_floating_ip(floatip.ip)
         except AttributeError:
             # if floating IPs are auto assigned, there will
             # be none listed
             return None
-        return float.ip
+        return floatip['id']
 
     def display_ip_for_server(self, server):
         logging.info(floating_ip_for_server(server))
 
     def remove_float_from_server(self, server):
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
+        ports = self.neutron.list_ports(device_id=server.id)
+        port_id = ports['ports'][0]['id']
+        server_fixed = ports['ports'][0]['fixed_ips'][0]['ip_address']
+        for floatip in self.neutron.list_floatingips()['floatingips']:
+            if floatip['fixed_ip_address']== server_fixed:
                 logging.info('Removing  %s from host id %s'
-                             % (float.ip, server.id))
-                server.remove_floating_ip(float)
+                             % (floatip['fixed_ip_address'], server.id))
+
+                request =  {
+                    'floatingip': {
+                        'port_id': None
+                    }
+                }
+                self.neutron.update_floatingip(floatip['id'], request)
                 break
 
     def create(self):
         server = get_server_by_name(self.nova, self.fqdn)
-        for float in self.nova.floating_ips.list():
-            if float.instance_id == server.id:
-                return
 
-        ip_address = self.assign_next_ip(server)
+        ports = self.neutron.list_ports(device_id=server.id)
+        port_id = ports['ports'][0]['id']
+        server_fixed = ports['ports'][0]['fixed_ips'][0]['ip_address']
+
+        for floatip in self.neutron.list_floatingips()['floatingips']:
+            if floatip['fixed_ip_address']== server_fixed:
+                return
+        ip_address = self.assign_next_ip(port_id)
         ip_address = calculate_address_for_server(server)
         attempts = 4
         while(ip_address is None and attempts):
@@ -388,8 +412,9 @@ class Network(object):
 
 
 class Server(object):
-    def __init__(self, nova, neutron, spec):
+    def __init__(self, nova, neutron, glance, spec):
         self.name = spec.name
+        self.glance = glance
         self.nova = nova
         self.neutron = neutron
         self.spec = spec
@@ -400,9 +425,9 @@ class Server(object):
                 return flavor.id
 
     def get_image_id(self, image_name):
-        for image in self.nova.images.list():
-            if image.name == image_name:
-                return image.id
+        for image in self.glance.images.list():
+            if image['name'] == image_name:
+                return image['id']
 
     def _host(self):
         if len(self.nova.servers.list(
@@ -539,7 +564,8 @@ class Router(object):
         return self.router_name
 
     def _external_id(self):
-        return self.neutron.list_networks(name='external')['networks'][0]['id']
+        #TODO Make public network name a config option
+        return self.neutron.list_networks(name='public')['networks'][0]['id']
 
     def create(self):
         _router_name = self.router_name
@@ -569,21 +595,21 @@ class Router(object):
 class SecurityGroup(object):
 
     def __init__(self, nova, neutron, security_groups, security_ports):
-        self.nova = nova
         self.neutron = neutron
         self.security_groups = security_groups
         self.security_ports = security_ports
 
     def create(self):
         missing_groups = list(self.security_groups)
-        for sec_group in self.nova.security_groups.list():
-            if sec_group.name in missing_groups:
-                missing_groups.remove(sec_group.name)
+        for sec_group in self.neutron.list_security_groups()['security_groups']:
+            if sec_group['name'] in missing_groups:
+                missing_groups.remove(sec_group['name'])
 
         for group_name in missing_groups:
-            sec_group = self.nova.security_groups.create(
-                name=group_name,
-                description=group_name)
+            sec_group = self.neutron.create_security_group(
+                {'security_group':
+                 {'name': group_name,
+                  'description': group_name}})['security_group']
             security_ports = self.security_ports[group_name]
             for protocol, ports in security_ports.iteritems():
                 for port in ports:
@@ -591,29 +617,29 @@ class SecurityGroup(object):
                         from_port, to_port = port
                     except TypeError:
                         from_port = to_port = port
-
-                    self.nova.security_group_rules.create(
-                        sec_group.id,
-                        from_port=from_port,
-                        ip_protocol=protocol,
-                        to_port=to_port,
-                        cidr='0.0.0.0/0')
+                    self.neutron.create_security_group_rule(
+                        { 'security_group_rule':
+                          {'security_group_id': sec_group['id'],
+                           'direction': 'ingress',
+                           'port_range_min': from_port,
+                           'port_range_max': to_port,
+                           'protocol': protocol,
+                           'ethertype': 'IPv4',}})
         self.display()
 
     def display(self):
-        for sec_group in self.nova.security_groups.list():
-            if sec_group.name not in self.security_groups:
+        for sec_group in self.neutron.list_security_groups()['security_groups']:
+            if sec_group['name'] not in self.security_groups:
                 continue
-            print ("group_id: %s" % sec_group.id)
-            print ("group_name: %s" % sec_group.name)
-
-            for rule in self.nova.security_groups.get(sec_group).rules:
+            print ("group_id: %s" % sec_group['id'])
+            print ("group_name: %s" % sec_group['name'])
+            for rule in sec_group['security_group_rules']:
                 print (rule)
 
     def teardown(self):
-        for sec_group in self.nova.security_groups.list():
-            if sec_group.name in self.security_groups:
-                self.nova.security_groups.delete(sec_group)
+        for sec_group in self.neutron.list_security_groups()['security_groups']:
+            if sec_group['name'] in self.security_groups:
+                self.neutron.delete_security_group(sec_group['id'])
         self.display()
 
 

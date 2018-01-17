@@ -11,10 +11,11 @@ import sys
 
 gi.require_version('GnomeKeyring', '1.0')
 
-from keystoneclient import auth as ksc_auth
-from keystoneclient import session as ksc_session
+from glanceclient import client as glanceclient
 from novaclient import client as novaclient
 from neutronclient.neutron import client as neutronclient
+import os_client_config
+
 
 import depend
 import planning
@@ -71,7 +72,8 @@ def float_ip_factory(resolver, name):
     fqdn = plan.make_fqdn(name)
     cloud_user = plan.profile['cloud_user']
     nova = resolver.resolve(novaclient.Client)
-    return work.FloatIP(nova, fqdn, cloud_user)
+    neutron = resolver.resolve(neutronclient.Client)
+    return work.FloatIP(nova, neutron, fqdn, cloud_user)
 
 
 def hosts_entries_factory(resolver, name=None):
@@ -111,33 +113,32 @@ def network_factory(resolver, name):
 
 
 def neutron_client_factory(resolver, name=None):
-    session = resolver.resolve(ksc_session.Session)
-    neutron = neutronclient.Client('2.0', session=session)
+    neutron = os_client_config.make_client('network')
     neutron.format = 'json'
     return neutron
 
 
 def nova_client_factory(resolver, name=None):
-    session = resolver.resolve(ksc_session.Session)
-    nova_client = novaclient.Client('2', session=session)
+    nova_client = os_client_config.make_client('compute')
     return nova_client
+
+def glance_client_factory(resolver, name=None):
+    glance_client = os_client_config.make_client('image')
+    return glance_client
 
 
 # TODO: this needs to be named.  It is just a server, not *the* nova server
 def nova_server_factory(resolver, name):
     nova = resolver.resolve(novaclient.Client)
     neutron = resolver.resolve(neutronclient.Client)
+    glance = resolver.resolve(glanceclient.Client)
     plan = resolver.resolve(planning.Plan)
     spec = plan.hosts[name]
-    return work.Server(nova, neutron, spec)
+    return work.Server(nova, neutron, glance, spec)
 
 
 def parser_factory(resolver, name=None):
     parser = argparse.ArgumentParser(description='')
-    ksc_session.Session.register_cli_options(parser)
-    ksc_auth.register_argparse_arguments(parser,
-                                         sys.argv,
-                                         default='v3password')
     parser.add_argument('-s', '--section',
                         dest='section',
                         default='scope')
@@ -148,10 +149,10 @@ def parser_factory(resolver, name=None):
 
 
 def plan_factory(resolver, name=None):
+    auth_url=""
     parser = resolver.resolve(argparse.ArgumentParser)
     args = parser.parse_args()
-    session = resolver.resolve(ksc_session.Session)
-    plan = planning.Plan(args.section, session)
+    plan = planning.Plan(args.section, auth_url)
     return plan
 
 
@@ -177,28 +178,11 @@ def security_group_factory(resolver, name=None):
     plan = resolver.resolve(planning.Plan)
     security_groups = []
     security_ports = {}
-    for group, ports in plan.security_ports.iteritems():
+    for group, ports in plan.security_ports.items():
         sec_group = "%s-%s" % (plan.name, group)
         security_groups.append(sec_group)
         security_ports[sec_group] = ports
     return work.SecurityGroup(nova, neutron, security_groups, security_ports)
-
-
-def session_factory(resolver, name=None):
-    parser = resolver.resolve(argparse.ArgumentParser)
-    args = parser.parse_args()
-    auth_plugin = ksc_auth.load_from_argparse_arguments(args)
-    try:
-        if not auth_plugin.auth_url:
-            logging.error('OS_AUTH_URL not set.  Aborting.')
-            sys.exit(-1)
-    except AttributeError:
-        pass
-
-    session = ksc_session.Session.load_from_cli_options(
-        args, auth=auth_plugin)
-
-    return session
 
 
 def worker_factory(resolver, name=None):
@@ -303,10 +287,10 @@ depend.register(work.HostsEntries, hosts_entries_factory)
 depend.register(work.Inventory, inventory_factory)
 
 depend.register(argparse.ArgumentParser, parser_factory)
-depend.register(ksc_session.Session, session_factory)
 depend.register(planning.Plan, plan_factory)
 depend.register("args", args_factory)
 depend.register("worker", worker_factory)
+depend.register(glanceclient.Client, glance_client_factory)
 depend.register(novaclient.Client, nova_client_factory)
 depend.register(neutronclient.Client, neutron_client_factory)
 
@@ -335,10 +319,10 @@ def main():
     logging.basicConfig(level=logging.ERROR)
 
     action(worker)
-    print json.dumps({
+    print (json.dumps({
         'success': True,
         'args': args_data
-    })
+    }))
 
 if __name__ == '__main__':
     main()
