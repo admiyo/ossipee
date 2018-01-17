@@ -440,7 +440,6 @@ class Server(object):
             for network in self.neutron.list_networks(
                     name=net_name)['networks']:
                 nics.append({'net-id': network['id']})
-
         response = self.nova.servers.create(
             self.spec.fqdn,
             image_id,

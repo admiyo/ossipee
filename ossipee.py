@@ -4,6 +4,7 @@ import argparse
 import gi
 import json
 import logging
+import os
 import re
 import shlex
 import six
@@ -149,7 +150,7 @@ def parser_factory(resolver, name=None):
 
 
 def plan_factory(resolver, name=None):
-    auth_url=""
+    auth_url=os.environ.get('OS_AUTH_URL', '')
     parser = resolver.resolve(argparse.ArgumentParser)
     args = parser.parse_args()
     plan = planning.Plan(args.section, auth_url)
